@@ -9,4 +9,15 @@
       viscous feedforward; FREE / TUNE / PD modes via std_srvs/Trigger services.
     </description>
   </class>
+  <class
+    name="pendulum_pd_control/DriveStatusBroadcaster"
+    type="pendulum_pd_control::DriveStatusBroadcaster"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Broadcaster for myActuator drive telemetry (temps, bus voltage, encoder,
+      filtered velocity/torque, position demand, following error). Claims a
+      configurable set of state interfaces, republishes each as std_msgs/Float64
+      and bundles them into one thresholded diagnostic_msgs/DiagnosticArray.
+    </description>
+  </class>
 </library>

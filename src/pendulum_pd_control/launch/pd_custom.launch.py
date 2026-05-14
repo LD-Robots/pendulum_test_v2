@@ -27,9 +27,10 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('pendulum_pd_control')
     desc_share = get_package_share_directory('pendulum_description')
 
-    controllers_yaml = os.path.join(pkg_share, 'config', 'controllers_custom.yaml')
-    pd_gains_yaml    = os.path.join(pkg_share, 'config', 'pd_gains.yaml')
-    slave_yaml       = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive.yaml')
+    controllers_yaml  = os.path.join(pkg_share, 'config', 'controllers_custom.yaml')
+    pd_gains_yaml     = os.path.join(pkg_share, 'config', 'pd_gains.yaml')
+    drive_status_yaml = os.path.join(pkg_share, 'config', 'drive_status_broadcaster.yaml')
+    slave_yaml        = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive.yaml')
 
     use_sim = LaunchConfiguration('use_sim')
 
@@ -98,10 +99,21 @@ def generate_launch_description():
         arguments=['pendulum_pd_controller', '--param-file', pd_gains_yaml],
         output='screen',
     )
+    # Drive telemetry broadcaster — real hardware only (sim has no temp/voltage
+    # interfaces). Runs alongside the PD controller.
+    drive_status_spawner = Node(
+        package='controller_manager', executable='spawner',
+        condition=UnlessCondition(use_sim),
+        arguments=['drive_status_broadcaster', '--param-file', drive_status_yaml],
+        output='screen',
+    )
 
     # Spawn the PD controller only after JSB is up, so the cm is responsive.
     pd_after_jsb = RegisterEventHandler(
         OnProcessExit(target_action=jsb_spawner, on_exit=[pd_spawner])
+    )
+    drive_status_after_jsb = RegisterEventHandler(
+        OnProcessExit(target_action=jsb_spawner, on_exit=[drive_status_spawner])
     )
 
     return LaunchDescription([
@@ -110,4 +122,5 @@ def generate_launch_description():
         GroupAction([rsp_sim, gz_sim, spawn_entity]),
         jsb_spawner,
         pd_after_jsb,
+        drive_status_after_jsb,
     ])

@@ -1,0 +1,37 @@
+# Drive telemetry broadcaster — real hardware only.
+# Standalone config so the sim path never loads it (the Gazebo URDF does not
+# expose the firmware telemetry interfaces). Loaded by the spawner via
+# `--param-file`; spawned with condition use_sim:=false in every launch.
+
+controller_manager:
+  ros__parameters:
+    drive_status_broadcaster:
+      type: pendulum_pd_control/DriveStatusBroadcaster
+
+drive_status_broadcaster:
+  ros__parameters:
+    joint: pendulum_joint
+
+    # State interfaces to claim and republish. Must match the named channels
+    # in config/ethercat/icube_x6_drive.yaml and the <state_interface> entries
+    # in pendulum_ethercat.urdf.xacro.
+    signals:
+      - motor_temperature
+      - drive_temperature
+      - bus_voltage
+      - first_encoder
+      - filtered_velocity
+      - filtered_torque
+      - position_demand
+      - following_error
+
+    publish_rate: 20.0        # Hz — telemetry is slow-moving
+
+    # Thresholds — only motor/drive temperature and bus voltage are graded.
+    # X6 is 48 V nominal (docs/motor_specs.md). Tune against the real rig.
+    motor_temp_warn:  70.0    # degC
+    motor_temp_error: 90.0    # degC
+    drive_temp_warn:  70.0    # degC
+    drive_temp_error: 85.0    # degC
+    bus_voltage_min:  40.0    # V
+    bus_voltage_max:  54.0    # V

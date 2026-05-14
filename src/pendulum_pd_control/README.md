@@ -23,15 +23,23 @@ side-by-side, each with a sim and a real launch.
 | 2 — stock JTC | `pd_jtc.launch.py` | `joint_trajectory_controller` (effort + gains) | JTC internals, 1 kHz | no (inertia FF only) |
 | 3 — setpoint node | `pd_effort_fwd.launch.py` | `JointGroupEffortController` + `pd_setpoint_node.py` | Python node, 200 Hz | yes |
 
+On real hardware, every launch also spawns a `drive_status_broadcaster`
+(`pendulum_pd_control/DriveStatusBroadcaster`) that publishes the drive's
+temperature / voltage / encoder telemetry — see [Drive telemetry](#drive-telemetry).
+
 ---
 
 ## Build
 
 ```bash
 cd ~/Documents/GitHub/pendulum_test_v2
-colcon build --packages-select pendulum_pd_control
+colcon build --packages-select pendulum_pd_control pendulum_description
 source install/setup.bash
 ```
+
+`pendulum_description` is included because the real-hardware URDF
+(`pendulum_ethercat.urdf.xacro`) carries the telemetry `<state_interface>`
+entries the `drive_status_broadcaster` claims.
 
 ---
 
@@ -61,7 +69,9 @@ ros2 launch pendulum_pd_control pd_effort_fwd.launch.py        # real
 ```
 
 Each launch spawns `joint_state_broadcaster` first, then the variant's
-controller (variant 3 additionally starts `pd_setpoint_node`).
+controller (variant 3 additionally starts `pd_setpoint_node`). On real
+hardware (`use_sim:=false`) the `drive_status_broadcaster` is also spawned
+alongside; it is skipped in sim since Gazebo has no telemetry interfaces.
 
 ---
 
@@ -181,6 +191,68 @@ Not realtime-safe — use variant 1 if you need 1 kHz determinism.
 
 ---
 
+## Drive telemetry
+
+The 2026-04-24 myActuator firmware exposes a set of read-only telemetry
+objects. `config/ethercat/icube_x6_drive.yaml` maps them all into a custom
+TxPDO 0x1A02, and the `drive_status_broadcaster` (a ros2_control broadcaster
+in this package) republishes them. It is spawned automatically alongside the
+PD controller in **every** launch — but **real hardware only** (the Gazebo
+URDF does not expose these interfaces, so the spawner is skipped when
+`use_sim:=true`).
+
+| Signal | Object | Unit | Notes |
+|--------|--------|------|-------|
+| `motor_temperature` | 0x2009 | °C | graded WARN/ERROR |
+| `drive_temperature` | 0x200C | °C | MOSFET temp, graded WARN/ERROR |
+| `bus_voltage` | 0x200A | V | graded ERROR if out of range |
+| `first_encoder` | 0x200B | pulses | absolute, raw counts |
+| `filtered_velocity` | 0x200D | rad/s | firmware-filtered |
+| `filtered_torque` | 0x200F | Nm | firmware-filtered (rig-specific factor) |
+| `position_demand` | 0x6062 | rad | CiA-402 demand value |
+| `following_error` | 0x60F4 | rad | CiA-402 following error |
+
+### Topics
+
+```bash
+# Thresholded health bundle — one DiagnosticStatus with all 8 as key/values
+ros2 topic echo /diagnostics
+
+# Per-signal std_msgs/Float64 — easy to rqt_plot / ros2 bag
+ros2 topic echo /drive_status_broadcaster/bus_voltage
+ros2 topic echo /drive_status_broadcaster/motor_temperature
+ros2 topic echo /drive_status_broadcaster/following_error
+# ... one topic per signal name above
+```
+
+### Thresholds
+
+Graded in `/diagnostics` as OK / WARN / ERROR. Defaults in
+`config/drive_status_broadcaster.yaml` (X6 is 48 V nominal — tune against the
+real rig):
+
+| Param | Default | Param | Default |
+|-------|---------|-------|---------|
+| `motor_temp_warn` | 70 °C | `motor_temp_error` | 90 °C |
+| `drive_temp_warn` | 70 °C | `drive_temp_error` | 85 °C |
+| `bus_voltage_min` | 40 V | `bus_voltage_max` | 54 V |
+
+`publish_rate` (default 20 Hz) and the `signals` list are also configurable
+there. Adjust live with `ros2 param set /drive_status_broadcaster <param>`.
+
+### Requirements & fallback
+
+- Requires the **2026-04-24 firmware** (ESI `docs/MT-Device_260424.xml`).
+  Older firmware lacks objects 0x2009–0x200F.
+- If the drive fails to reach EtherCAT OP with an IgH mapping error
+  (`0x06040041` — "object cannot be mapped into the PDO"), the firmware
+  rejects the custom TxPDO. Fall back by reverting the `tpdo:` block in
+  `config/ethercat/icube_x6_drive.yaml` to the ESI's predefined `0x1A00`
+  (status only) and removing the 8 telemetry `<state_interface>` lines from
+  `pendulum_ethercat.urdf.xacro`.
+
+---
+
 ## Verifying
 
 ```bash
@@ -197,7 +269,9 @@ Suggested bring-up order (lowest risk first):
    steady-state error grow (confirms the gravity FF path runs).
 4. **Real, variant 1** — only after sim passes. Run the EtherCAT pre-flight
    from `docs/ETHERCAT.md`, launch with `use_sim:=false`, hold at 0, then
-   command small steps (±0.1 rad).
+   command small steps (±0.1 rad). Confirm `drive_status_broadcaster` is
+   active and `/diagnostics` shows a `pendulum_drive: telemetry` status at
+   level OK (≈48 V, plausible °C).
 
 ---
 
