@@ -1,0 +1,44 @@
+{
+  "folders": [
+    {
+      "name": "pendulum v2(code)",
+      "path": "."
+    },
+    {
+      "name": "docs (field notes)",
+      "path": "../ldr-harambe-docs"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/build": true,
+      "**/install": true,
+      "**/log": true,
+      "**/.DS_Store": true
+    },
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "editor.rulers": [88, 100],
+    "editor.minimap.enabled": false,
+    "ROS2.distro": "jazzy",
+    "python.autoComplete.extraPaths": [
+      "/home/andrei-dragomir/ws_moveit/build/moveit_configs_utils",
+      "/home/andrei-dragomir/ws_moveit/install/moveit_configs_utils/lib/python3.12/site-packages",
+      "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+      "/home/andrei-dragomir/ws_moveit/build/moveit_configs_utils",
+      "/home/andrei-dragomir/ws_moveit/install/moveit_configs_utils/lib/python3.12/site-packages",
+      "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ]
+  },
+  "extensions": {
+    "recommendations": [
+      "anthropic.claude-code",
+      "ms-vscode.live-server",
+      "yzhang.markdown-all-in-one",
+      "ms-python.python",
+      "ms-iot.vscode-ros"
+    ]
+  }
+}

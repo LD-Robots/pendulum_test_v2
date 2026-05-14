@@ -1,0 +1,121 @@
+<?xml version="1.0"?>
+<!--
+  Pendulum URDF for ABSOLUTE target tracking (no limits, continuous rotation).
+
+  Physical setup (2026-04-22):
+    - Bar: 0.74 m long, 0.313 kg, attached to motor at its MIDDLE (pivot)
+      → bar extends ±0.37 m from pivot
+    - Weight: 0.5 kg at ONE END of the bar (bottom, -0.37 m from pivot)
+    - Total: 0.313 kg (bar) + 0.5 kg (weight) = 0.813 kg
+    - COM offset: z = -0.228 m from pivot (pulled down by weight)
+    - Gravity torque at horizontal: ~1.82 Nm — policy must compensate
+    - Inertia about pivot:
+        Bar:    (1/12)*0.313*(0.02² + 0.74²) = 0.01430 kg·m²
+        Weight: 0.5 * 0.37²                   = 0.06845 kg·m²
+        Total:                                  0.08275 kg·m²
+    - Inertia about COM: 0.08275 − 0.813*0.228² = 0.04053 kg·m²
+-->
+<robot name="pendulum">
+
+  <link name="base_link">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <link name="motor_body">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.1"/>
+      </geometry>
+      <material name="steel_blue">
+        <color rgba="0.3 0.4 0.7 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.57079632679 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="motor_body_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_body"/>
+    <origin xyz="0 0.06 1.2" rpy="0 0 0"/>
+  </joint>
+
+  <!--
+    Pendulum = bar (centered on pivot) + weight (at bottom end).
+    Two visuals, one inertial block with combined properties.
+    COM offset from pivot makes gravity produce torque at non-vertical angles.
+  -->
+  <link name="pendulum_link">
+    <!-- Visual 1: the orange bar (centered at pivot, extends ±0.37 m) -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.74"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="1.0 0.5 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.02 0.02 0.74"/>
+      </geometry>
+    </collision>
+
+    <!-- Visual 2: the 0.5 kg weight attached at the bottom end (-0.37 m) -->
+    <visual>
+      <origin xyz="0 0 -0.37" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+      <material name="dark_red">
+        <color rgba="0.7 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.37" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.05 0.05 0.05"/>
+      </geometry>
+    </collision>
+
+    <!--
+      Combined inertial block:
+        mass = 0.313 kg (bar) + 0.5 kg (weight) = 0.813 kg
+        COM offset z = -0.228 m (below pivot, pulled by weight)
+        I about COM on Y axis (rotation): 0.0405 kg·m²
+          derived from I_pivot − m*d² = 0.0828 − 0.813*0.228² = 0.0405
+    -->
+    <inertial>
+      <origin xyz="0 0 -0.228" rpy="0 0 0"/>
+      <mass value="0.813"/>
+      <inertia ixx="0.0405" ixy="0" ixz="0"
+               iyy="0.0405" iyz="0"
+               izz="0.0002"/>
+    </inertial>
+  </link>
+
+  <!-- Very wide joint limits — allows continuous rotation in any direction -->
+  <joint name="pendulum_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="pendulum_link"/>
+    <origin xyz="0 0 1.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1000.0" upper="1000.0" effort="20.0" velocity="16.02"/>
+    <dynamics damping="0.065" friction="0.33"/>
+  </joint>
+
+</robot>

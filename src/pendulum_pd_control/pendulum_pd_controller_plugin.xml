@@ -1,0 +1,12 @@
+<library path="pendulum_pd_control">
+  <class
+    name="pendulum_pd_control/PendulumPDController"
+    type="pendulum_pd_control::PendulumPDController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Host-side PD controller for a single revolute joint driven in CST mode.
+      Reads position and velocity; writes effort. Supports gravity, inertia and
+      viscous feedforward; FREE / TUNE / PD modes via std_srvs/Trigger services.
+    </description>
+  </class>
+</library>

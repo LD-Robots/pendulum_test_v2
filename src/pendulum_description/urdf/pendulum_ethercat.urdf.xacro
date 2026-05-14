@@ -1,0 +1,140 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="pendulum">
+
+  <!-- ==================== Properties ==================== -->
+  <xacro:property name="bar_length" value="0.7"/>
+  <xacro:property name="bar_width"  value="0.02"/>
+  <xacro:property name="bar_depth"  value="0.02"/>
+  <xacro:property name="bar_mass"   value="0.313"/>
+  <xacro:property name="pivot_height" value="1.2"/>
+
+  <xacro:property name="ixx" value="${(1.0/12.0)*bar_mass*(bar_depth**2 + bar_length**2)}"/>
+  <xacro:property name="iyy" value="${(1.0/12.0)*bar_mass*(bar_width**2 + bar_length**2)}"/>
+  <xacro:property name="izz" value="${(1.0/12.0)*bar_mass*(bar_width**2 + bar_depth**2)}"/>
+
+  <!-- ==================== Links ==================== -->
+
+  <link name="world"/>
+
+  <link name="motor_body">
+    <visual>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.1"/>
+      </geometry>
+      <material name="steel_blue">
+        <color rgba="0.3 0.4 0.7 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      <geometry>
+        <cylinder radius="0.1" length="0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+  <joint name="motor_body_joint" type="fixed">
+    <parent link="world"/>
+    <child link="motor_body"/>
+    <origin xyz="0 ${bar_depth/2 + 0.04 + 0.01} ${pivot_height}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="motor_shaft">
+    <visual>
+      <origin xyz="0 ${-(bar_depth/2 + 0.04 + 0.01)/2} 0" rpy="${pi/2} 0 0"/>
+      <geometry>
+        <cylinder radius="0.015" length="${bar_depth/2 + 0.04 + 0.01}"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="shaft_joint" type="fixed">
+    <parent link="pendulum_link"/>
+    <child link="motor_shaft"/>
+    <origin xyz="0 ${bar_depth/2} 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="pendulum_link">
+    <visual>
+      <origin xyz="0 0 ${-bar_length/2.0}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${bar_width} ${bar_depth} ${bar_length}"/>
+      </geometry>
+      <material name="orange">
+        <color rgba="1.0 0.5 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${-bar_length/2.0}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${bar_width} ${bar_depth} ${bar_length}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 ${-bar_length/2.0}" rpy="0 0 0"/>
+      <mass value="${bar_mass}"/>
+      <inertia ixx="${ixx}" ixy="0" ixz="0"
+               iyy="${iyy}" iyz="0"
+               izz="${izz}"/>
+    </inertial>
+  </link>
+
+  <!-- ==================== Joint ==================== -->
+  <joint name="pendulum_joint" type="revolute">
+    <parent link="world"/>
+    <child link="pendulum_link"/>
+    <origin xyz="0 0 ${pivot_height}" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="${2*pi}" effort="20.0" velocity="16.02"/>
+    <dynamics damping="0.16" friction="1.6"/>
+  </joint>
+
+  <!-- ==================== ros2_control — EtherCAT hardware ==================== -->
+  <!-- Path to the EtherCAT slave config YAML. No default — real launches must
+       pass slave_config:=… (e.g. $(ros2 pkg prefix pendulum_bringup)/share/
+       pendulum_bringup/config/ethercat/icub_x6_drive.yaml). Empty placeholder
+       keeps the xacro parseable for non-EtherCAT consumers. -->
+  <xacro:arg name="slave_config" default=""/>
+  <!-- mode_of_operation: 10 = CST (default), 8 = CSP (PVT). Must match the SDO in slave_config. -->
+  <xacro:arg name="mode_of_operation" default="10"/>
+  <!-- pvt_mode: when true, expose position/velocity/kp/kd command interfaces in addition to effort
+       so a multi-interface controller can stream the full PVT payload mapped by RxPDO 0x1601. -->
+  <xacro:arg name="pvt_mode" default="false"/>
+
+  <ros2_control name="iCubX6EthercatSystem" type="system">
+    <hardware>
+      <plugin>ethercat_driver/EthercatDriver</plugin>
+      <param name="master_id">0</param>
+      <param name="control_frequency">1000</param>
+    </hardware>
+    <joint name="pendulum_joint">
+      <command_interface name="effort">
+        <param name="min">-20.0</param>
+        <param name="max">20.0</param>
+      </command_interface>
+      <xacro:if value="$(arg pvt_mode)">
+        <command_interface name="position"/>
+        <command_interface name="velocity"/>
+        <command_interface name="kp"/>
+        <command_interface name="kd"/>
+      </xacro:if>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+      <ec_module name="icub_x6">
+        <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
+        <param name="alias">0</param>
+        <param name="position">0</param>
+        <param name="mode_of_operation">$(arg mode_of_operation)</param>
+        <param name="slave_config">$(arg slave_config)</param>
+      </ec_module>
+    </joint>
+  </ros2_control>
+
+</robot>

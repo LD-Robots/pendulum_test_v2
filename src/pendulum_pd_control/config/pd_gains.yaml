@@ -1,0 +1,49 @@
+# Shared gain + plant params for the custom PD plugin (variant 1) and the
+# Python setpoint node (variant 3). JTC (variant 2) inlines its own
+# gains block in controllers_jtc.yaml because its parameter format differs.
+#
+# Defaults come from pd_tuning_guide.html §05 (J=0.102, ω_n=15, ζ=0.7).
+# mgl is a placeholder — measure on this rig before trusting gravity FF
+# (see pd_tuning_guide.html §02 and pendulum_isaac_pd.urdf inertials).
+
+pendulum_pd_controller:
+  ros__parameters:
+    joint: pendulum_joint
+
+    Kp:        22.95
+    Kd:        2.14
+    tau_limit: 20.0
+
+    mgl:       4.10
+    J:         0.102
+    Fv:        0.05
+    comp_sign: 1.0
+
+    ff_gravity: true
+    ff_inertia: true
+    ff_viscous: false
+
+    hold_position: 0.0
+
+# Same numbers, exposed at the node level so variant 3's setpoint node
+# picks them up without re-declaring the YAML structure.
+pd_setpoint_node:
+  ros__parameters:
+    joint: pendulum_joint
+    command_topic: /pendulum_effort_controller/commands
+
+    Kp:        22.95
+    Kd:        2.14
+    tau_limit: 20.0
+
+    mgl:       4.10
+    J:         0.102
+    Fv:        0.05
+    comp_sign: 1.0
+
+    ff_gravity: true
+    ff_inertia: true
+    ff_viscous: false
+
+    hold_position: 0.0
+    rate_hz:       200.0

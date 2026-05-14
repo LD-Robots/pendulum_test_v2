@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pendulum_pd_control</name>
+  <version>0.1.0</version>
+  <description>
+    Host-side PD loop controller for the LDR pendulum testbed.
+    Drives the myActuator X6 in CST (mode 10); the PD law tau = Kp*(q_d - q) +
+    Kd*(qd_d - qd) plus gravity / inertia / viscous feedforward runs in software
+    and writes the effort command interface. Ships three controller variants
+    (custom plugin, JTC-with-gains, JointGroupEffortController + setpoint node)
+    plus sim + real launches for each.
+  </description>
+  <maintainer email="andrei.dragomir@ldrobots.ro">Andrei Dragomir</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>controller_interface</depend>
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>realtime_tools</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <exec_depend>ros2_controllers</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>effort_controllers</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>ethercat_driver</exec_depend>
+  <exec_depend>gz_ros2_control</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>pendulum_description</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <controller_interface plugin="${prefix}/pendulum_pd_controller_plugin.xml"/>
+  </export>
+</package>

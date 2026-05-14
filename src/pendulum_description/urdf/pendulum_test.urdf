@@ -1,0 +1,285 @@
+<?xml version="1.0" ?>
+<!-- Generated using onshape-to-robot -->
+<!-- Onshape https://cad.onshape.com/documents/0a7fad25fc76b10bc68cd82a/w/96b966e5cc4db55c79c14ab1/e/d1fe285537dc0b80065003c2 -->
+<robot name="pendulum_test">
+  <!-- Link urdf_masa -->
+  <link name="urdf_masa">
+    <inertial>
+      <origin xyz="1.101e-09 -0.00216375 0.0537769" rpy="0 0 0"/>
+      <mass value="16.32"/>
+      <inertia ixx="0.925693" ixy="4.516e-09" ixz="1.9989e-08" iyy="1.0281" iyz="0.0467944" izz="0.966281"/>
+    </inertial>
+    <!-- Part urdf_menghina -->
+    <visual>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_menghina.stl"/>
+      </geometry>
+      <material name="urdf_menghina_material">
+        <color rgba="0.972549 0.529412 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_menghina.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_masa -->
+    <visual>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_masa.stl"/>
+      </geometry>
+      <material name="urdf_masa_material">
+        <color rgba="0.498039 0.498039 0.498039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_masa.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_x6 -->
+    <visual>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_x6.stl"/>
+      </geometry>
+      <material name="urdf_x6_material">
+        <color rgba="0.960784 0.835294 0.470588 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_x6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- Link urdf_spacer -->
+  <link name="urdf_spacer">
+    <inertial>
+      <origin xyz="-9.40034e-07 3.43567e-06 -0.0451209" rpy="0 0 0"/>
+      <mass value="0.277"/>
+      <inertia ixx="0.000204906" ixy="3.75e-10" ixz="1.0966e-08" iyy="0.000188403" iyz="5.527e-09" izz="0.000195731"/>
+    </inertial>
+    <!-- Part urdf_rotor_base -->
+    <visual>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_rotor_base.stl"/>
+      </geometry>
+      <material name="urdf_rotor_base_material">
+        <color rgba="0.647059 0.647059 0.647059 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_rotor_base.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_spacer -->
+    <visual>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_spacer.stl"/>
+      </geometry>
+      <material name="urdf_spacer_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_spacer.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_rotor_lid -->
+    <visual>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_rotor_lid.stl"/>
+      </geometry>
+      <material name="urdf_rotor_lid_material">
+        <color rgba="0.231373 0.380392 0.705882 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_rotor_lid.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- Link urdf_profile_700 -->
+  <link name="urdf_profile_700">
+    <inertial>
+      <origin xyz="-0.00432073 -4.9393e-08 -0.445007" rpy="0 0 0"/>
+      <mass value="0.525"/>
+      <inertia ixx="0.0286674" ixy="1.26e-10" ixz="-0.000466791" iyy="0.0287381" iyz="-6.06e-09" izz="0.000160326"/>
+    </inertial>
+    <!-- Part urdf_profile_700 -->
+    <visual>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_profile_700.stl"/>
+      </geometry>
+      <material name="urdf_profile_700_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_profile_700.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_cap -->
+    <visual>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_cap.stl"/>
+      </geometry>
+      <material name="urdf_cap_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_cap.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_weight_base -->
+    <visual>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_base.stl"/>
+      </geometry>
+      <material name="urdf_weight_base_material">
+        <color rgba="0.768627 0.886275 0.952941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_base.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_weight_lid -->
+    <visual>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_lid.stl"/>
+      </geometry>
+      <material name="urdf_weight_lid_material">
+        <color rgba="0.796078 0.905882 0.745098 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_lid.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_cap2 -->
+    <visual>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_cap2.stl"/>
+      </geometry>
+      <material name="urdf_cap2_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_cap2.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_weight_shaft -->
+    <visual>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_shaft.stl"/>
+      </geometry>
+      <material name="urdf_weight_shaft_material">
+        <color rgba="0.960784 0.835294 0.470588 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_shaft.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- Link urdf_weight -->
+  <link name="urdf_weight">
+    <inertial>
+      <origin xyz="-2.56e-10 8.82e-10 0.00721586" rpy="0 0 0"/>
+      <mass value="1.037"/>
+      <inertia ixx="0.000384095" ixy="-2.829e-09" ixz="2e-12" iyy="0.000384111" iyz="-1.4e-11" izz="0.000710724"/>
+    </inertial>
+    <!-- Part urdf_weight_stopper -->
+    <visual>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_stopper.stl"/>
+      </geometry>
+      <material name="urdf_weight_stopper_material">
+        <color rgba="0.972549 0.529412 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight_stopper.stl"/>
+      </geometry>
+    </collision>
+    <!-- Part urdf_weight -->
+    <visual>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight.stl"/>
+      </geometry>
+      <material name="urdf_weight_material">
+        <color rgba="0.980392 0.713725 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://pendulum_description/meshes/urdf_weight.stl"/>
+      </geometry>
+    </collision>
+  </link>
+  <!-- Joint from urdf_profile_700 to urdf_weight -->
+  <joint name="Weight" type="fixed">
+    <origin xyz="-0.0182 -0 -0.65" rpy="3.14159 1.5708 0"/>
+    <parent link="urdf_profile_700"/>
+    <child link="urdf_weight"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" velocity="10"/>
+  </joint>
+  <!-- Joint from urdf_spacer to urdf_profile_700 -->
+  <joint name="Profile" type="fixed">
+    <origin xyz="-0.35 -0 -0.0541" rpy="0 -1.5708 0"/>
+    <parent link="urdf_spacer"/>
+    <child link="urdf_profile_700"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" velocity="10" lower="0" upper="0"/>
+  </joint>
+  <!-- Joint from urdf_masa to urdf_spacer -->
+  <joint name="rotor_roll_joint" type="revolute">
+    <origin xyz="-0 -0.227029 0.209622" rpy="-1.5708 1.5708 0"/>
+    <parent link="urdf_masa"/>
+    <child link="urdf_spacer"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" velocity="10" lower="-3.141592653589793" upper="3.141592653589793"/>
+  </joint>
+</robot>

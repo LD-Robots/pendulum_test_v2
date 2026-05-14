@@ -1,0 +1,14 @@
+# Variant 1 — custom PD plugin.
+# joint_state_broadcaster + pendulum_pd_controller (our pluginlib export).
+# Gains and FF flags come from pd_gains.yaml (loaded alongside this file in
+# the launch).
+
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    pendulum_pd_controller:
+      type: pendulum_pd_control/PendulumPDController

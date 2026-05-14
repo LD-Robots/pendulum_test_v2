@@ -1,0 +1,506 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="pendulum">
+
+  <!-- ==================== Control mode args (declared early for use below) ==================== -->
+  <!--
+    Four mutually exclusive modes:
+      gz_policy=true     → effort-direct ONNX plugin (legacy 11-obs)
+      pd_policy=true     → ONNX delta-action + internal PD plugin
+      swingup_policy=true → Isaac Lab swing-up protocol (5-obs, effort direct)
+      all=false          → ros2_control (default)
+  -->
+  <xacro:arg name="gz_policy" default="false"/>
+  <xacro:arg name="pd_policy" default="false"/>
+  <xacro:arg name="swingup_policy" default="false"/>
+  <xacro:arg name="onnx_path" default=""/>
+  <xacro:arg name="target_pos" default="3.14159"/>
+  <xacro:arg name="effort_scale" default="20.0"/>
+  <xacro:arg name="clip_actions" default="5.0"/>
+  <xacro:arg name="decimation" default="20"/>
+
+  <!-- Swing-up plugin args (CST + soft PD architecture).
+       Uses a SEPARATE action scale arg from pd_policy because swingup target
+       is offset around default_pos with scale=π, vs pd_policy delta scale=0.25. -->
+  <xacro:arg name="velocity_limit" default="16.0"/>
+  <xacro:arg name="episode_length_s" default="8.0"/>
+  <xacro:arg name="swingup_action_scale" default="3.14159265"/>
+  <xacro:arg name="default_pos" default="3.14159265"/>
+  <xacro:arg name="grav_comp_enabled" default="true"/>
+  <xacro:arg name="grav_comp_mass" default="1.84"/>
+  <xacro:arg name="grav_comp_com" default="0.228"/>
+
+  <!-- PD-policy-only args (delta action + internal PD).
+       action_scale must match training: 0.5 → max target_delta = 2.5 rad
+       (Kp×delta = 7.5 Nm, ~70% margin over peak gravity 4.5 Nm at horizontal). -->
+  <xacro:arg name="action_scale" default="0.5"/>
+  <xacro:arg name="error_clamp" default="12.5"/>
+  <xacro:arg name="pd_decimation" default="4"/>
+  <xacro:arg name="kp" default="3.0"/>
+  <xacro:arg name="kd" default="0.66"/>
+  <xacro:arg name="weight_mass" default="1.037"/>
+  <xacro:arg name="friction_comp" default="0.33"/>
+  <xacro:arg name="effort_limit" default="20.0"/>
+  <xacro:arg name="warmup_steps" default="200"/>
+  <xacro:arg name="warmup_kp_boost" default="2.0"/>
+  <xacro:arg name="warmup_kd_boost" default="3.0"/>
+
+  <!-- Joint dynamics (measured real X6) -->
+  <xacro:arg name="joint_damping" default="0.065"/>
+  <xacro:arg name="joint_friction" default="0.33"/>
+
+  <!-- Mesh directory — uses package:// URI resolved at runtime by ROS / Gazebo.
+       CMakeLists installs meshes/*.stl into share/pendulum_description/meshes,
+       so once `colcon build && source install/setup.bash` runs, this path
+       resolves correctly without hardcoding any absolute filesystem location.
+       Override only if you ship a different mesh set. -->
+  <xacro:arg name="mesh_dir"
+    default="package://pendulum_description/meshes"/>
+
+  <!-- gz_ros2_control plugin's controllers.yaml — passed at parse time as a
+       filesystem path. Empty default keeps RViz/display launches parseable;
+       sim launches must override (e.g. controllers_yaml:=$(ros2 pkg prefix
+       pendulum_bringup)/share/pendulum_bringup/config/controllers.yaml). -->
+  <xacro:arg name="controllers_yaml" default=""/>
+
+  <!-- =========================================================================
+       Physical model — onshape-to-robot export of the real build
+       (pendulum_test_v1/pendulum_test.urdf).
+       Total rotating mass ≈ 0.277 + 0.525 + 1.037 = 1.839 kg
+       ========================================================================= -->
+
+  <link name="world"/>
+
+  <!-- ====================== Base: table + menghina + motor housing ====================== -->
+  <link name="urdf_masa">
+    <inertial>
+      <origin xyz="1.101e-09 -0.00216375 0.0537769" rpy="0 0 0"/>
+      <mass value="16.32"/>
+      <inertia ixx="0.925693" ixy="4.516e-09" ixz="1.9989e-08"
+               iyy="1.0281"   iyz="0.0467944"
+               izz="0.966281"/>
+    </inertial>
+    <visual>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_menghina.stl"/>
+      </geometry>
+      <material name="urdf_menghina_material">
+        <color rgba="0.972549 0.529412 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_menghina.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_masa.stl"/>
+      </geometry>
+      <material name="urdf_masa_material">
+        <color rgba="0.498039 0.498039 0.498039 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_masa.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_x6.stl"/>
+      </geometry>
+      <material name="urdf_x6_material">
+        <color rgba="0.960784 0.835294 0.470588 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_x6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="masa_to_world" type="fixed">
+    <parent link="world"/>
+    <child link="urdf_masa"/>
+    <!-- +0.6 m so the weight (end of 700mm profile) doesn't clip the ground. -->
+    <origin xyz="0 0 0.6" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ====================== Rotor (spacer) — rotates with motor ====================== -->
+  <link name="urdf_spacer">
+    <inertial>
+      <origin xyz="-9.40034e-07 3.43567e-06 -0.0451209" rpy="0 0 0"/>
+      <mass value="0.277"/>
+      <inertia ixx="0.000204906" ixy="3.75e-10" ixz="1.0966e-08"
+               iyy="0.000188403" iyz="5.527e-09"
+               izz="0.000195731"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_rotor_base.stl"/>
+      </geometry>
+      <material name="urdf_rotor_base_material">
+        <color rgba="0.647059 0.647059 0.647059 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_rotor_base.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_spacer.stl"/>
+      </geometry>
+      <material name="urdf_spacer_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_spacer.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_rotor_lid.stl"/>
+      </geometry>
+      <material name="urdf_rotor_lid_material">
+        <color rgba="0.231373 0.380392 0.705882 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_rotor_lid.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ==================== Motor joint ====================
+       Original onshape joint name "rotor_roll_joint" renamed to "pendulum_joint"
+       (controllers, ONNX plugin, ros2_control all expect this name).
+       Joint limits changed [-π, π] → [0, 2π] to match training distribution
+       (pendulum_isaac_pd.urdf). If the physical hang position doesn't land
+       at pos=0 after this change, adjust `default_pos` in policy config.
+  -->
+  <xacro:property name="_is_swingup"
+    value="${'$(arg swingup_policy)' == 'true'}"/>
+  <xacro:property name="_is_other_policy"
+    value="${'$(arg gz_policy)' == 'true' or '$(arg pd_policy)' == 'true'}"/>
+  <xacro:property name="_is_policy"
+    value="${_is_swingup or _is_other_policy}"/>
+
+  <!-- swingup_policy AND pd_policy: CONTINUOUS joint (no limits) — both
+       train policies that need free rotation (swingup pumps energy past
+       upright; pd-delta drives across the wraparound to track arbitrary
+       targets without hitting walls). Match real motor multi-turn encoder. -->
+  <xacro:property name="_is_continuous"
+    value="${'$(arg swingup_policy)' == 'true' or '$(arg pd_policy)' == 'true'}"/>
+
+  <xacro:if value="${_is_continuous}">
+    <joint name="pendulum_joint" type="continuous">
+      <origin xyz="-0 -0.227029 0.209622" rpy="-1.5708 1.5708 0"/>
+      <parent link="urdf_masa"/>
+      <child link="urdf_spacer"/>
+      <axis xyz="0 0 1"/>
+      <dynamics damping="$(arg joint_damping)" friction="$(arg joint_friction)"/>
+    </joint>
+  </xacro:if>
+
+  <!-- gz_policy (legacy effort-direct): single-rev revolute [0, 2π]. -->
+  <xacro:if value="$(arg gz_policy)">
+    <joint name="pendulum_joint" type="revolute">
+      <origin xyz="-0 -0.227029 0.209622" rpy="-1.5708 1.5708 0"/>
+      <parent link="urdf_masa"/>
+      <child link="urdf_spacer"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="0.0" upper="6.28318530718" effort="20.0" velocity="16.02"/>
+      <dynamics damping="$(arg joint_damping)" friction="$(arg joint_friction)"/>
+    </joint>
+  </xacro:if>
+
+  <!-- ros2_control (default): revolute [0, 2π], hardcoded measured physics. -->
+  <xacro:unless value="${_is_policy}">
+    <joint name="pendulum_joint" type="revolute">
+      <origin xyz="-0 -0.227029 0.209622" rpy="-1.5708 1.5708 0"/>
+      <parent link="urdf_masa"/>
+      <child link="urdf_spacer"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="0.0" upper="6.28318530718" effort="20.0" velocity="16.02"/>
+      <dynamics damping="0.065" friction="0.33"/>
+    </joint>
+  </xacro:unless>
+
+  <!-- ====================== 700 mm profile + weight-mount assembly ====================== -->
+  <link name="urdf_profile_700">
+    <inertial>
+      <origin xyz="-0.00432073 -4.9393e-08 -0.445007" rpy="0 0 0"/>
+      <mass value="0.525"/>
+      <inertia ixx="0.0286674" ixy="1.26e-10" ixz="-0.000466791"
+               iyy="0.0287381" iyz="-6.06e-09"
+               izz="0.000160326"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_profile_700.stl"/>
+      </geometry>
+      <material name="urdf_profile_700_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_profile_700.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_cap.stl"/>
+      </geometry>
+      <material name="urdf_cap_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_cap.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_base.stl"/>
+      </geometry>
+      <material name="urdf_weight_base_material">
+        <color rgba="0.768627 0.886275 0.952941 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_base.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_lid.stl"/>
+      </geometry>
+      <material name="urdf_weight_lid_material">
+        <color rgba="0.796078 0.905882 0.745098 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_lid.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_cap2.stl"/>
+      </geometry>
+      <material name="urdf_cap2_material">
+        <color rgba="0.615686 0.811765 0.929412 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_cap2.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_shaft.stl"/>
+      </geometry>
+      <material name="urdf_weight_shaft_material">
+        <color rgba="0.960784 0.835294 0.470588 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_shaft.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Profile" type="fixed">
+    <origin xyz="-0.35 -0 -0.0541" rpy="0 -1.5708 0"/>
+    <parent link="urdf_spacer"/>
+    <child link="urdf_profile_700"/>
+  </joint>
+
+  <!-- ====================== Weight assembly ====================== -->
+  <link name="urdf_weight">
+    <inertial>
+      <origin xyz="-2.56e-10 8.82e-10 0.00721586" rpy="0 0 0"/>
+      <mass value="$(arg weight_mass)"/>
+      <inertia ixx="0.000384095" ixy="-2.829e-09" ixz="2e-12"
+               iyy="0.000384111" iyz="-1.4e-11"
+               izz="0.000710724"/>
+    </inertial>
+    <visual>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_stopper.stl"/>
+      </geometry>
+      <material name="urdf_weight_stopper_material">
+        <color rgba="0.972549 0.529412 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight_stopper.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight.stl"/>
+      </geometry>
+      <material name="urdf_weight_material">
+        <color rgba="0.980392 0.713725 0.00392157 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="$(arg mesh_dir)/urdf_weight.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Weight" type="fixed">
+    <origin xyz="-0.0182 -0 -0.65" rpy="3.14159 1.5708 0"/>
+    <parent link="urdf_profile_700"/>
+    <child link="urdf_weight"/>
+  </joint>
+
+  <!-- =========================================================================
+       Plugin / ros2_control blocks — unchanged control machinery.
+       ========================================================================= -->
+
+  <xacro:if value="$(arg gz_policy)">
+    <!-- ONNX policy plugin — direct effort control -->
+    <gazebo>
+      <plugin filename="pendulum_gz_policy_plugin"
+              name="pendulum_gz::PendulumPolicyPlugin">
+        <onnx_path>$(arg onnx_path)</onnx_path>
+        <joint_name>pendulum_joint</joint_name>
+        <target_pos>$(arg target_pos)</target_pos>
+        <effort_scale>$(arg effort_scale)</effort_scale>
+        <clip_actions>$(arg clip_actions)</clip_actions>
+        <decimation>$(arg decimation)</decimation>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <xacro:if value="$(arg pd_policy)">
+    <!-- ONNX delta-action policy wrapped in internal PD (sim-mirror of real-motor deploy) -->
+    <gazebo>
+      <plugin filename="pendulum_gz_pd_policy_plugin"
+              name="pendulum_gz::PendulumPdPolicyPlugin">
+        <onnx_path>$(arg onnx_path)</onnx_path>
+        <joint_name>pendulum_joint</joint_name>
+        <target_pos>$(arg target_pos)</target_pos>
+        <action_scale>$(arg action_scale)</action_scale>
+        <clip_actions>$(arg clip_actions)</clip_actions>
+        <error_clamp>$(arg error_clamp)</error_clamp>
+        <decimation>$(arg pd_decimation)</decimation>
+        <kp>$(arg kp)</kp>
+        <kd>$(arg kd)</kd>
+        <friction_comp>$(arg friction_comp)</friction_comp>
+        <effort_limit>$(arg effort_limit)</effort_limit>
+        <warmup_steps>$(arg warmup_steps)</warmup_steps>
+        <warmup_kp_boost>$(arg warmup_kp_boost)</warmup_kp_boost>
+        <warmup_kd_boost>$(arg warmup_kd_boost)</warmup_kd_boost>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <!-- Gazebo joint-state publisher — exposes pendulum_joint pos/vel on a gz
+       transport topic so the launch can bridge it to ROS /joint_states.
+       Active only in policy modes (ros2_control mode publishes /joint_states
+       via joint_state_broadcaster directly, so no bridge needed there). -->
+  <xacro:if value="${_is_policy}">
+    <gazebo>
+      <plugin filename="gz-sim-joint-state-publisher-system"
+              name="gz::sim::systems::JointStatePublisher">
+        <joint_name>pendulum_joint</joint_name>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <xacro:if value="$(arg swingup_policy)">
+    <!-- Isaac Lab swing-up policy (CST + soft PD, 5-dim obs, position-target action) -->
+    <gazebo>
+      <plugin filename="pendulum_gz_swingup_plugin"
+              name="pendulum_gz::PendulumSwingupPlugin">
+        <onnx_path>$(arg onnx_path)</onnx_path>
+        <joint_name>pendulum_joint</joint_name>
+        <action_scale>$(arg swingup_action_scale)</action_scale>
+        <clip_actions>$(arg clip_actions)</clip_actions>
+        <velocity_limit>$(arg velocity_limit)</velocity_limit>
+        <decimation>$(arg decimation)</decimation>
+        <episode_length_s>$(arg episode_length_s)</episode_length_s>
+        <kp>$(arg kp)</kp>
+        <kd>$(arg kd)</kd>
+        <default_pos>$(arg default_pos)</default_pos>
+        <effort_limit>$(arg effort_limit)</effort_limit>
+        <grav_comp_enabled>$(arg grav_comp_enabled)</grav_comp_enabled>
+        <grav_comp_mass>$(arg grav_comp_mass)</grav_comp_mass>
+        <grav_comp_com>$(arg grav_comp_com)</grav_comp_com>
+        <warmup_steps>$(arg warmup_steps)</warmup_steps>
+        <warmup_kp_boost>$(arg warmup_kp_boost)</warmup_kp_boost>
+        <warmup_kd_boost>$(arg warmup_kd_boost)</warmup_kd_boost>
+      </plugin>
+    </gazebo>
+  </xacro:if>
+
+  <xacro:unless value="${_is_policy}">
+    <!-- ros2_control — manual position/effort control -->
+    <ros2_control name="GazeboSimSystem" type="system">
+      <hardware>
+        <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+      </hardware>
+      <joint name="pendulum_joint">
+        <command_interface name="position"/>
+        <command_interface name="effort"/>
+        <state_interface name="position">
+          <param name="initial_value">0.0</param>
+        </state_interface>
+        <state_interface name="velocity"/>
+        <state_interface name="effort"/>
+      </joint>
+    </ros2_control>
+
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <parameters>$(arg controllers_yaml)</parameters>
+      </plugin>
+    </gazebo>
+  </xacro:unless>
+
+</robot>
