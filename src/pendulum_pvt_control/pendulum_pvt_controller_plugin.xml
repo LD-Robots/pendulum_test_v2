@@ -1,0 +1,16 @@
+<library path="pendulum_pvt_control">
+  <class
+    name="pendulum_pvt_control/PendulumPVTController"
+    type="pendulum_pvt_control::PendulumPVTController"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      PVT / MIT-mode (CiA-402 mode 5) impedance controller for a single revolute
+      joint. With drive_side_pd:true (real hardware) it claims the position,
+      velocity, effort, kp and kd command interfaces and streams the full PVT
+      payload to a myActuator X6 that runs the PD law internally. With
+      drive_side_pd:false (Gazebo sim) it claims only effort and replicates the
+      PD law in software. Supports gravity, inertia and viscous feedforward;
+      FREE / PVT modes via std_srvs/Trigger services.
+    </description>
+  </class>
+</library>

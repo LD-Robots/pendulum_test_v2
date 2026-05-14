@@ -24,7 +24,7 @@ pendulum_jtc:
     gains:
       pendulum_joint:
         p: 22.95           # Kp from pd_tuning_guide §05
-        d: 2.14            # Kd
+        d: 4.14            # Kd
         i: 0.0
         ff_velocity_scale:     0.05    # Fv (viscous friction)
         ff_acceleration_scale: 0.102   # J  (inertia FF)

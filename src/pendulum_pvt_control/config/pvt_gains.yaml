@@ -1,0 +1,31 @@
+# PVT / MIT-mode controller gains — real-hardware defaults.
+# Loaded by the spawner via `--param-file`. The sim launch path layers
+# pvt_gains_sim.yaml on top to flip `drive_side_pd` to false.
+#
+# In drive_side_pd:true the drive runs tau = Kp*(q_d - q) + Kd*(qd_d - qd) +
+# tau_ff internally; the host only streams the payload. Note:
+#   - `tau_limit` clamps the host feed-forward ONLY. The hard torque ceiling is
+#     the 0x6072 max_torque SDO in config/ethercat/icube_x6_drive_pvt.yaml.
+#   - `comp_sign` only negates the host feed-forward. A flipped motor mounting
+#     must be corrected with negative EtherCAT factors, not comp_sign — keep it
+#     at 1.0 when drive_side_pd:true.
+
+pendulum_pvt_controller:
+  ros__parameters:
+    joint: pendulum_joint
+    drive_side_pd: true        # real: the X6 runs the PD/MIT law in firmware
+
+    Kp:        22.95           # stiffness  (Nm/rad)   — streamed to PVT_KP
+    Kd:        2.14            # damping    (Nm·s/rad) — streamed to PVT_KD
+    tau_limit: 20.0            # clamp on the host feed-forward (Nm)
+
+    mgl:       4.10            # gravity torque amplitude — placeholder, rig-specific
+    J:         0.102           # rotating inertia (kg·m²)
+    Fv:        0.05            # viscous friction coeff
+    comp_sign: 1.0             # keep 1.0 for drive_side_pd:true (see header)
+
+    ff_gravity: true
+    ff_inertia: true
+    ff_viscous: false
+
+    hold_position: 0.0         # seed setpoint until the first ~/setpoint or ~/hold

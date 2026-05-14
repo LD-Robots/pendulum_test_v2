@@ -1,0 +1,11 @@
+# Sim-only override — layered on top of pvt_gains.yaml by the spawner
+# (`--param-file pvt_gains.yaml --param-file pvt_gains_sim.yaml`). Only the keys
+# that differ from real hardware belong here.
+#
+# drive_side_pd:false makes the controller claim only the `effort` command
+# interface and replicate the drive's MIT law in software — Gazebo's
+# gz_ros2_control system has no kp/kd command interfaces.
+
+pendulum_pvt_controller:
+  ros__parameters:
+    drive_side_pd: false

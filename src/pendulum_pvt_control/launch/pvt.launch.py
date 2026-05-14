@@ -1,10 +1,17 @@
-"""Variant 2 — stock joint_trajectory_controller with effort + gains.
+"""PVT / MIT mode 5 — drive-side impedance control.
 
-  ros2 launch pendulum_pd_control pd_jtc.launch.py            # real (default)
-  ros2 launch pendulum_pd_control pd_jtc.launch.py use_sim:=true
+  ros2 launch pendulum_pvt_control pvt.launch.py            # real (default)
+  ros2 launch pendulum_pvt_control pvt.launch.py use_sim:=true
 
-Send setpoints via /pendulum_jtc/joint_trajectory or the
-/pendulum_jtc/follow_joint_trajectory action.
+Real: the myActuator X6 runs tau = Kp*(q_d - q) + Kd*(qd_d - qd) + tau_ff in
+firmware; the controller streams position/velocity/effort/kp/kd (RxPDO 0x1601).
+Sim: the same controller replicates that law in software and writes effort only;
+Gazebo bringup is reused from the pendulum_gazebo package.
+
+Stream setpoints to /pendulum_pvt_controller/setpoint
+(trajectory_msgs/JointTrajectoryPoint). /pendulum_pvt_controller/hold snapshots
+the current position; /pendulum_pvt_controller/free drops to zero drive torque.
+Ramp Kp/Kd live with `ros2 param set /pendulum_pvt_controller Kp|Kd <value>`.
 """
 
 import os
@@ -27,12 +34,13 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    pkg_share  = get_package_share_directory('pendulum_pd_control')
+    pkg_share  = get_package_share_directory('pendulum_pvt_control')
     desc_share = get_package_share_directory('pendulum_description')
 
-    controllers_yaml  = os.path.join(pkg_share, 'config', 'controllers_jtc.yaml')
-    drive_status_yaml = os.path.join(pkg_share, 'config', 'drive_status_broadcaster.yaml')
-    slave_yaml        = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive.yaml')
+    controllers_yaml = os.path.join(pkg_share, 'config', 'controllers_pvt.yaml')
+    gains_yaml       = os.path.join(pkg_share, 'config', 'pvt_gains.yaml')
+    gains_sim_yaml   = os.path.join(pkg_share, 'config', 'pvt_gains_sim.yaml')
+    slave_yaml       = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive_pvt.yaml')
 
     use_sim = LaunchConfiguration('use_sim')
 
@@ -43,8 +51,8 @@ def generate_launch_description():
         Command([
             'xacro ', real_xacro,
             ' slave_config:=', slave_yaml,
-            ' mode_of_operation:=10',
-            ' pvt_mode:=false',
+            ' mode_of_operation:=5',
+            ' pvt_mode:=true',
         ]),
         value_type=str,
     )
@@ -74,8 +82,9 @@ def generate_launch_description():
         output='screen',
     )
 
-    # Gazebo bringup — resource path, gz sim + custom world, robot spawn, and
-    # the /clock bridge — all live in the reusable pendulum_gazebo package.
+    # Reusable Gazebo bringup — resource paths, custom world, robot spawn from
+    # /robot_description, /clock bridge. rsp_sim publishes /robot_description;
+    # sim_bringup deliberately does not start robot_state_publisher.
     sim_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([
@@ -89,25 +98,30 @@ def generate_launch_description():
         arguments=['joint_state_broadcaster'],
         output='screen',
     )
-    jtc_spawner = Node(
-        package='controller_manager', executable='spawner',
-        arguments=['pendulum_jtc'],
-        output='screen',
-    )
-    # Drive telemetry broadcaster — real hardware only (sim has no temp/voltage
-    # interfaces). Runs alongside the JTC.
-    drive_status_spawner = Node(
+    # Real: drive_side_pd defaults to true in pvt_gains.yaml — the X6 runs the
+    # PD law and the controller claims position/velocity/effort/kp/kd.
+    pvt_spawner_real = Node(
         package='controller_manager', executable='spawner',
         condition=UnlessCondition(use_sim),
-        arguments=['drive_status_broadcaster', '--param-file', drive_status_yaml],
+        arguments=['pendulum_pvt_controller', '--param-file', gains_yaml],
+        output='screen',
+    )
+    # Sim: the second --param-file overrides drive_side_pd to false — the
+    # controller runs the PD law in software and claims only effort.
+    pvt_spawner_sim = Node(
+        package='controller_manager', executable='spawner',
+        condition=IfCondition(use_sim),
+        arguments=['pendulum_pvt_controller',
+                   '--param-file', gains_yaml,
+                   '--param-file', gains_sim_yaml],
         output='screen',
     )
 
-    jtc_after_jsb = RegisterEventHandler(
-        OnProcessExit(target_action=jsb_spawner, on_exit=[jtc_spawner])
+    pvt_real_after_jsb = RegisterEventHandler(
+        OnProcessExit(target_action=jsb_spawner, on_exit=[pvt_spawner_real])
     )
-    drive_status_after_jsb = RegisterEventHandler(
-        OnProcessExit(target_action=jsb_spawner, on_exit=[drive_status_spawner])
+    pvt_sim_after_jsb = RegisterEventHandler(
+        OnProcessExit(target_action=jsb_spawner, on_exit=[pvt_spawner_sim])
     )
 
     return LaunchDescription([
@@ -115,6 +129,6 @@ def generate_launch_description():
         GroupAction([rsp_real, ros2_control_node]),
         GroupAction([rsp_sim, sim_bringup]),
         jsb_spawner,
-        jtc_after_jsb,
-        drive_status_after_jsb,
+        pvt_real_after_jsb,
+        pvt_sim_after_jsb,
     ])

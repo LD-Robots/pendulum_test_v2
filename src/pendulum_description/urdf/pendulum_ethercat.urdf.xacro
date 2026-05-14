@@ -101,7 +101,7 @@
        pendulum_bringup/config/ethercat/icub_x6_drive.yaml). Empty placeholder
        keeps the xacro parseable for non-EtherCAT consumers. -->
   <xacro:arg name="slave_config" default=""/>
-  <!-- mode_of_operation: 10 = CST (default), 8 = CSP (PVT). Must match the SDO in slave_config. -->
+  <!-- mode_of_operation: 10 = CST (default), 5 = PVT. Must match the SDO in slave_config. -->
   <xacro:arg name="mode_of_operation" default="10"/>
   <!-- pvt_mode: when true, expose position/velocity/kp/kd command interfaces in addition to effort
        so a multi-interface controller can stream the full PVT payload mapped by RxPDO 0x1601. -->
@@ -130,15 +130,12 @@
       <!-- Telemetry from the 2026-04-24 myActuator firmware (TxPDO 0x1A02).
            Mapped by config/ethercat/icube_x6_drive.yaml; published by the
            DriveStatusBroadcaster. Real hardware only — the Gazebo URDF does
-           not expose these. -->
+           not expose these. Limited to what 0x1A02 carries: this firmware
+           does not support PDO remapping, so encoder / filtered vel+torque /
+           position-demand / following-error are not available as interfaces. -->
       <state_interface name="motor_temperature"/>
       <state_interface name="drive_temperature"/>
       <state_interface name="bus_voltage"/>
-      <state_interface name="first_encoder"/>
-      <state_interface name="filtered_velocity"/>
-      <state_interface name="filtered_torque"/>
-      <state_interface name="position_demand"/>
-      <state_interface name="following_error"/>
       <ec_module name="icub_x6">
         <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
         <param name="alias">0</param>

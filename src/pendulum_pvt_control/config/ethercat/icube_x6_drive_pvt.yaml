@@ -1,0 +1,61 @@
+# EtherCAT slave config for the pendulum's single myActuator X6 drive — PVT /
+# MIT mode (CiA-402 mode 5). The host streams target position, target velocity,
+# torque feedforward and the Kp/Kd gains every cycle; the drive runs
+# tau = Kp*(q_d - q) + Kd*(qd_d - qd) + tau_ff internally at 1 kHz.
+#
+# PVT needs RxPDO 0x1601 (22 bytes) rather than the CST 0x1600 (16 bytes) —
+# 0x1601 adds the vendor objects PVT_KP (0x2000) and PVT_KD (0x2001). Channel
+# order / padding match the 2026-04-24 firmware ESI (docs/MT-Device_260424.xml).
+#
+# Gain scaling: the drive applies the written PVT_KP/PVT_KD value x 0.001
+# internally, so a `factor: 1000.0` lets the controller command Kp/Kd in
+# engineering units (Nm/rad, Nm·s/rad) and the wire carries the int32 x1000.
+#
+# Effort factors from docs/motor_specs.md X6 drive #0 calibration row:
+#   SI -> raw : 37.14 (Nm -> per-mille rated current)
+#   raw -> SI : 0.02693 (per-mille rated current -> Nm)
+# These are rig-specific; recalibrate before deploy on a different drive.
+
+vendor_id:  0x00202008
+product_id: 0x00000000
+assign_activate: 0x0300          # DC sync mode
+auto_fault_reset: true
+auto_state_transitions: true
+mode_of_operation: 5             # PVT / MIT impedance mode
+
+sdo:
+  - {index: 0x6072, sub_index: 0, type: uint16, value: 800}    # max_torque 80% of rated current — the hard ceiling on the drive's PD output
+  - {index: 0x60C2, sub_index: 1, type: int8,   value: 1}      # interpolation time = 1
+  - {index: 0x60C2, sub_index: 2, type: int8,   value: -3}     # base 10^-3 s -> 1 ms cycle
+
+rpdo:   # Master -> Slave — PVT control channel 0x1601 (22 bytes)
+  - index: 0x1601
+    channels:
+      - {index: 0x6040, sub_index: 0, type: uint16, command_interface: ~,        default: 0}      # control_word
+      - {index: 0x607a, sub_index: 0, type: int32,  command_interface: position, factor: 20861.0} # target_position (rad -> counts)
+      - {index: 0x60ff, sub_index: 0, type: int32,  command_interface: velocity, factor: 20861.0} # target_velocity (rad/s -> counts/s)
+      - {index: 0x6071, sub_index: 0, type: int16,  command_interface: effort,   factor: 37.14}   # torque feedforward (Nm -> per-mille rated current, rig-specific)
+      - {index: 0x2000, sub_index: 0, type: int32,  command_interface: kp,       factor: 1000.0}  # PVT_KP — drive applies value x0.001
+      - {index: 0x2001, sub_index: 0, type: int32,  command_interface: kd,       factor: 1000.0}  # PVT_KD — drive applies value x0.001
+      - {index: 0x6060, sub_index: 0, type: int8,   command_interface: ~,        default: 5}      # mode = PVT, no runtime switching
+      - {index: 0x2ffd, sub_index: 0, type: int8,   command_interface: ~,        default: 0}      # Dummy Byte1 (padding)
+
+tpdo:   # Slave -> Master — firmware-fixed 0x1A02 layout (22 bytes).
+        # Identical to the CST config: this drive does NOT support PDO remapping,
+        # so the channel list must match the ESI's 0x1A02 entry order exactly
+        # (docs/MT-Device_260424.xml) or the slave refuses PREOP->SAFEOP with AL
+        # status 0x001E "Invalid input configuration". The pendulum_ethercat
+        # xacro still declares the motor/drive temperature and bus voltage state
+        # interfaces, so they must stay mapped here.
+  - index: 0x1a02
+    channels:
+      - {index: 0x6041, sub_index: 0, type: uint16, state_interface: ~}                                  # status_word (read by CiA-402 plugin)
+      - {index: 0x6064, sub_index: 0, type: int32,  state_interface: position,          factor: 4.794e-5}  # actual_position (rad)
+      - {index: 0x606c, sub_index: 0, type: int32,  state_interface: velocity,          factor: 4.794e-5}  # actual_velocity (rad/s)
+      - {index: 0x6077, sub_index: 0, type: int16,  state_interface: effort,            factor: 0.02693}   # actual_torque (Nm, rig-specific)
+      - {index: 0x603f, sub_index: 0, type: uint16, state_interface: ~}                                  # error_code (read by CiA-402 plugin)
+      - {index: 0x2009, sub_index: 0, type: int16,  state_interface: motor_temperature, factor: 1.0}       # motor temperature (degC)
+      - {index: 0x200c, sub_index: 0, type: int16,  state_interface: drive_temperature, factor: 1.0}       # drive/MOSFET temperature (degC)
+      - {index: 0x200a, sub_index: 0, type: uint16, state_interface: bus_voltage,       factor: 1.0}       # bus voltage (V, rounded int)
+      - {index: 0x6061, sub_index: 0, type: int8,   state_interface: ~}                                  # mode_display (read by CiA-402 plugin)
+      - {index: 0x2ffe, sub_index: 0, type: int8,   state_interface: ~}                                  # Dummy Byte2 (padding)

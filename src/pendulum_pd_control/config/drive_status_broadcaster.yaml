@@ -14,16 +14,13 @@ drive_status_broadcaster:
 
     # State interfaces to claim and republish. Must match the named channels
     # in config/ethercat/icube_x6_drive.yaml and the <state_interface> entries
-    # in pendulum_ethercat.urdf.xacro.
+    # in pendulum_ethercat.urdf.xacro. Limited to what TxPDO 0x1A02 carries —
+    # this firmware does not support PDO remapping, so encoder / filtered
+    # vel+torque / position-demand / following-error are not available.
     signals:
       - motor_temperature
       - drive_temperature
       - bus_voltage
-      - first_encoder
-      - filtered_velocity
-      - filtered_torque
-      - position_demand
-      - following_error
 
     publish_rate: 20.0        # Hz — telemetry is slow-moving
 

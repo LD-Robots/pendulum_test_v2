@@ -76,18 +76,14 @@ def generate_launch_description():
         output='screen',
     )
 
-    gz_sim = IncludeLaunchDescription(
+    # Gazebo bringup — resource path, gz sim + custom world, robot spawn, and
+    # the /clock bridge — all live in the reusable pendulum_gazebo package.
+    sim_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            PathJoinSubstitution([FindPackageShare('ros_gz_sim'), 'launch', 'gz_sim.launch.py'])
+            PathJoinSubstitution([
+                FindPackageShare('pendulum_gazebo'), 'launch', 'sim_bringup.launch.py'])
         ]),
-        launch_arguments={'gz_args': '-r empty.sdf'}.items(),
         condition=IfCondition(use_sim),
-    )
-    spawn_entity = Node(
-        package='ros_gz_sim', executable='create',
-        condition=IfCondition(use_sim),
-        arguments=['-name', 'pendulum', '-topic', 'robot_description'],
-        output='screen',
     )
 
     jsb_spawner = Node(
@@ -129,7 +125,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim', default_value='false'),
         GroupAction([rsp_real, ros2_control_node]),
-        GroupAction([rsp_sim, gz_sim, spawn_entity]),
+        GroupAction([rsp_sim, sim_bringup]),
         jsb_spawner,
         effort_after_jsb,
         pd_node_after_effort,
