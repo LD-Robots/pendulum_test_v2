@@ -19,7 +19,7 @@
 vendor_id:  0x00202008
 product_id: 0x00000000
 assign_activate: 0x0300          # DC sync mode
-auto_fault_reset: true
+auto_fault_reset: false           # don't reset faults automatically — let the controller decide when to try again after a fault
 auto_state_transitions: true
 mode_of_operation: 5             # PVT / MIT impedance mode
 
@@ -53,7 +53,8 @@ tpdo:   # Slave -> Master — firmware-fixed 0x1A02 layout (22 bytes).
       - {index: 0x6064, sub_index: 0, type: int32,  state_interface: position,          factor: 4.794e-5}  # actual_position (rad)
       - {index: 0x606c, sub_index: 0, type: int32,  state_interface: velocity,          factor: 4.794e-5}  # actual_velocity (rad/s)
       - {index: 0x6077, sub_index: 0, type: int16,  state_interface: effort,            factor: 0.02693}   # actual_torque (Nm, rig-specific)
-      - {index: 0x603f, sub_index: 0, type: uint16, state_interface: ~}                                  # error_code (read by CiA-402 plugin)
+      - {index: 0x603f, sub_index: 0, type: uint16, state_interface: error_code}                         # error_code — also exposed for fault diagnosis; the CiA-402 plugin still reads it by index
+
       - {index: 0x2009, sub_index: 0, type: int16,  state_interface: motor_temperature, factor: 1.0}       # motor temperature (degC)
       - {index: 0x200c, sub_index: 0, type: int16,  state_interface: drive_temperature, factor: 1.0}       # drive/MOSFET temperature (degC)
       - {index: 0x200a, sub_index: 0, type: uint16, state_interface: bus_voltage,       factor: 1.0}       # bus voltage (V, rounded int)

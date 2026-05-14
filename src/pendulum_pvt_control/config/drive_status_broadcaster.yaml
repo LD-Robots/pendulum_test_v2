@@ -1,0 +1,37 @@
+# Drive telemetry broadcaster — real hardware only.
+# Reuses pendulum_pd_control/DriveStatusBroadcaster. Loaded by the spawner via
+# `--param-file`, which delivers these parameters only — the controller `type`
+# is declared in controllers_pvt.yaml (the spawner's --param-file does not
+# propagate the type).
+#
+# Republishes the drive's TxPDO 0x1A02 telemetry: each signal as a
+# std_msgs/Float64 on ~/<signal>, plus a thresholded diagnostic_msgs/
+# DiagnosticArray on /diagnostics. `error_code` (CiA-402 0x603F) is included
+# for PVT fault diagnosis — it is published raw (0 = no fault) and is not
+# thresholded by the broadcaster.
+
+drive_status_broadcaster:
+  ros__parameters:
+    joint: pendulum_joint
+
+    # Must match the named channels in config/ethercat/icube_x6_drive_pvt.yaml
+    # and the <state_interface> entries in pendulum_ethercat.urdf.xacro
+    # (error_code is exposed there only when pvt_mode:=true).
+    signals:
+      - error_code
+      - motor_temperature
+      - drive_temperature
+      - bus_voltage
+
+    publish_rate: 50.0        # Hz — a bit faster than the pd_control default so
+                              # a latched fault (auto_fault_reset:false) shows
+                              # up promptly while reproducing.
+
+    # Thresholds — only motor/drive temperature and bus voltage are graded;
+    # error_code is passed through ungraded. X6 is 48 V nominal.
+    motor_temp_warn:  70.0    # degC
+    motor_temp_error: 90.0    # degC
+    drive_temp_warn:  70.0    # degC
+    drive_temp_error: 85.0    # degC
+    bus_voltage_min:  40.0    # V
+    bus_voltage_max:  54.0    # V

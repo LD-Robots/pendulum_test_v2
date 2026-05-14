@@ -34,6 +34,7 @@
   <exec_depend>gz_ros2_control</exec_depend>
   <exec_depend>pendulum_description</exec_depend>
   <exec_depend>pendulum_gazebo</exec_depend>
+  <exec_depend>pendulum_pd_control</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
 

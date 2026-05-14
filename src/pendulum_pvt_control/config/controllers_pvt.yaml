@@ -1,7 +1,12 @@
 # PVT / MIT mode 5 — controller_manager line-up.
 # Shared by the real and sim launch paths (real: passed to ros2_control_node;
 # sim: passed to the gz_ros2_control plugin via the sim xacro). Per-controller
-# gains live in pvt_gains.yaml, loaded by the spawner via --param-file.
+# parameters live in pvt_gains.yaml / drive_status_broadcaster.yaml, loaded by
+# the spawner via --param-file.
+#
+# Every controller's `type` MUST be declared here: the spawner's --param-file
+# delivers parameters but NOT the type, so the type has to be in the file the
+# controller_manager node is launched with.
 
 controller_manager:
   ros__parameters:
@@ -12,3 +17,8 @@ controller_manager:
 
     pendulum_pvt_controller:
       type: pendulum_pvt_control/PendulumPVTController
+
+    # Real hardware only — spawned with UnlessCondition(use_sim). Declared here
+    # unconditionally (harmless in sim: a type that is never spawned).
+    drive_status_broadcaster:
+      type: pendulum_pd_control/DriveStatusBroadcaster

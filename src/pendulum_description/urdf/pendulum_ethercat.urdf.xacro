@@ -136,6 +136,12 @@
       <state_interface name="motor_temperature"/>
       <state_interface name="drive_temperature"/>
       <state_interface name="bus_voltage"/>
+      <!-- error_code (CiA-402 0x603F) — exposed only on the PVT path, whose
+           slave config maps 0x603F to a named interface for fault diagnosis.
+           The CST path keeps it unnamed (read internally by the CiA-402 plugin). -->
+      <xacro:if value="$(arg pvt_mode)">
+        <state_interface name="error_code"/>
+      </xacro:if>
       <ec_module name="icub_x6">
         <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
         <param name="alias">0</param>

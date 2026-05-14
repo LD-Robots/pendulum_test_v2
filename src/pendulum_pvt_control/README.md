@@ -34,13 +34,14 @@ torque-feedforward channel (`effort`), gated by the `ff_*` flags.
 
 ```bash
 cd ~/Documents/GitHub/pendulum_test_v2
-colcon build --packages-select pendulum_pvt_control pendulum_description pendulum_gazebo
+colcon build --packages-select pendulum_pvt_control pendulum_description pendulum_gazebo pendulum_pd_control
 source install/setup.bash
 ```
 
 `pendulum_description` carries the `pvt_mode` xacro block that exposes the
 `position`/`velocity`/`kp`/`kd` command interfaces; `pendulum_gazebo` provides
-the reusable sim bringup (`sim_bringup.launch.py`).
+the reusable sim bringup (`sim_bringup.launch.py`); `pendulum_pd_control`
+provides the `DriveStatusBroadcaster` reused for drive telemetry.
 
 ---
 
@@ -63,8 +64,8 @@ ros2 launch pendulum_pvt_control pvt.launch.py            # real
 ```
 
 Both paths spawn `joint_state_broadcaster` first, then
-`pendulum_pvt_controller`. No drive telemetry broadcaster is spawned (see
-`pendulum_pd_control` if you need `/diagnostics`).
+`pendulum_pvt_controller`. On real hardware (`use_sim:=false`) a
+`drive_status_broadcaster` is also spawned — see [Drive telemetry](#drive-telemetry).
 
 ---
 
@@ -177,6 +178,38 @@ ros2 param set /pendulum_pvt_controller ff_gravity false
 
 Changing `drive_side_pd` at runtime has no effect — the claimed command-interface
 set is fixed when the controller is configured. Re-spawn to switch.
+
+---
+
+## Drive telemetry
+
+On real hardware the launch also spawns a `drive_status_broadcaster`
+(`pendulum_pd_control/DriveStatusBroadcaster`, reused) that republishes the
+drive's TxPDO `0x1A02` telemetry. **Real hardware only** — the Gazebo URDF has
+no telemetry interfaces, so the spawner is skipped when `use_sim:=true`.
+
+| Topic | Type | Source | Notes |
+|-------|------|--------|-------|
+| `/drive_status_broadcaster/error_code` | `std_msgs/Float64` | CiA-402 `0x603F` | `0` = no fault; non-zero = fault code (e.g. `0x4110` = temperature) |
+| `/drive_status_broadcaster/bus_voltage` | `std_msgs/Float64` | `0x200A` | V — graded in `/diagnostics` |
+| `/drive_status_broadcaster/motor_temperature` | `std_msgs/Float64` | `0x2009` | °C — graded in `/diagnostics` |
+| `/drive_status_broadcaster/drive_temperature` | `std_msgs/Float64` | `0x200C` | °C — graded in `/diagnostics` |
+| `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | all four | thresholded health bundle (`error_code` passed through ungraded) |
+
+```bash
+# watch the fault code while reproducing a cut-out
+ros2 topic echo /drive_status_broadcaster/error_code
+ros2 topic echo /drive_status_broadcaster/bus_voltage
+ros2 topic echo /diagnostics
+```
+
+`error_code` is mapped to a named state interface only on the PVT path —
+[icube_x6_drive_pvt.yaml](config/ethercat/icube_x6_drive_pvt.yaml) maps `0x603F`
+to `error_code` and [pendulum_ethercat.urdf.xacro] declares it under
+`pvt_mode:=true`. The CiA-402 plugin still reads `0x603F` internally for its own
+fault state machine — naming it is purely additive. Thresholds and
+`publish_rate` (50 Hz) live in
+[config/drive_status_broadcaster.yaml](config/drive_status_broadcaster.yaml).
 
 ---
 
