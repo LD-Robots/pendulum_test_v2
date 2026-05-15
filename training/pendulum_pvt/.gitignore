@@ -1,0 +1,5 @@
+# Training run outputs — checkpoints, tensorboard events, exported ONNX
+logs/
+*.pt
+__pycache__/
+*.pyc

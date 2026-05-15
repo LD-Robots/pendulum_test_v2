@@ -1,0 +1,308 @@
+<?xml version="1.0"?>
+<!--
+  Pendulum URDF — SWING-UP variant with COMPLIANT weight mount.
+
+  Same physical build as pendulum_isaac_swingup.urdf, but the Weight joint
+  (profile_700 → urdf_weight) is changed from FIXED to REVOLUTE with a
+  small ±0.1 rad range about the bar's longitudinal axis.
+
+  Why: the real aluminum bar (700 mm) with the 1.037 kg weight mounted off
+  the bar's geometric centerline behaves like a torsional spring. We saw a
+  high-Q vibration on the real X6 that disappears when the operator holds
+  the weight (= damps that DOF). The base URDF treats the bar as rigid, so
+  no sim could reproduce it. This variant adds the torsional DOF so it can.
+
+  Modeled DOF (joint name "Weight"):
+    - axis: in joint frame, X — which after rpy=(π, π/2, 0) maps to the
+      profile_700 link's −Z (= bar long axis). So rotation here = torsion
+      of the bar about its own long axis.
+    - limit: ±0.1 rad (≈ ±5.7°) — well above any expected real twist.
+    - damping=0.05 — light, to keep the mode under-damped (matches what we
+      observed: the vibration rings for several cycles before settling).
+    - friction=0 — bar twist isn't dry-friction-limited.
+
+  IMPORTANT: URDF has no native joint stiffness. Loaders must add it:
+    - MuJoCo: patch <joint stiffness=".." damping=".."/> after compile
+      (pattern already used in scripts/mujoco_pd_policy.py for inertia).
+      Suggested start: stiffness=200 N·m/rad → ω₀ = √(k/J) ≈ 200 rad/s
+      (32 Hz) with weight Izz = 5e-3 kg·m². Tune to match the observed
+      vibration frequency on the real hardware.
+    - Isaac Lab: extend the articulation cfg with a second
+      ImplicitActuatorCfg targeting joint_name="Weight" with stiffness
+      and damping set there.
+    - Gazebo: add a transmission + PD effort controller via xacro, OR use
+      gz-sim's <joint><dynamics><spring_reference/><spring_stiffness/>
+      extension.
+
+  Weight COM is offset slightly in the link's Y by 5 mm (xyz y=0.005)
+  vs the original (≈0). This creates a gravity moment arm for the
+  compliance DOF — without offset, gravity exerts zero torque about the
+  bar long axis and the mode would only be excited by joint acceleration
+  cross-coupling. The real build has the weight bolted to one side of the
+  profile's mounting plate, so this matches reality.
+
+  Use this file for sim2sim experiments (MuJoCo, Gazebo). Do NOT train
+  against this without first deciding whether the policy should observe
+  the compliance state — the rotor-side joint_pos is unchanged, but the
+  weight's inertia-coupled response shifts.
+-->
+<robot name="pendulum">
+
+  <link name="base_link">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <!-- Fixed base: table + menghina + motor housing -->
+  <link name="urdf_masa">
+    <inertial>
+      <origin xyz="1.101e-09 -0.00216375 0.0537769" rpy="0 0 0"/>
+      <mass value="16.32"/>
+      <inertia ixx="0.925693" ixy="4.516e-09" ixz="1.9989e-08"
+               iyy="1.0281"   iyz="0.0467944"
+               izz="0.966281"/>
+    </inertial>
+    <visual>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_menghina.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.1089e-08 -0.223416 0.181468" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_menghina.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_masa.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0 0.0156153 0.041001" rpy="-1.5708 -0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_masa.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_x6.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0 -0.191779 0.209622" rpy="-1.5708 0 3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_x6.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="masa_to_base" type="fixed">
+    <parent link="base_link"/>
+    <child link="urdf_masa"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Rotor (rotates with motor) -->
+  <link name="urdf_spacer">
+    <inertial>
+      <origin xyz="-9.40034e-07 3.43567e-06 -0.0451209" rpy="0 0 0"/>
+      <mass value="0.277"/>
+      <inertia ixx="0.000204906" ixy="3.75e-10" ixz="1.0966e-08"
+               iyy="0.000188403" iyz="5.527e-09"
+               izz="0.000195731"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_rotor_base.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0 0 -0.0387375" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_rotor_base.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_spacer.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.03149e-05 -0 -0.012" rpy="-3.14159 -0 1.5708"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_spacer.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_rotor_lid.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.33413e-07 -1.26979e-06 -0.065381" rpy="-3.14159 -0 -3.14159"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_rotor_lid.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Motor joint: CONTINUOUS (no limits) for swing-up. -->
+  <joint name="pendulum_joint" type="continuous">
+    <origin xyz="-0 -0.227029 0.209622" rpy="-1.5708 1.5708 0"/>
+    <parent link="urdf_masa"/>
+    <child link="urdf_spacer"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.065" friction="0.0"/>
+  </joint>
+
+  <!-- 700mm profile + weight mount (fixed to rotor) -->
+  <link name="urdf_profile_700">
+    <inertial>
+      <origin xyz="-0.00432073 -4.9393e-08 -0.445007" rpy="0 0 0"/>
+      <mass value="0.525"/>
+      <inertia ixx="0.0286674" ixy="1.26e-10" ixz="-0.000466791"
+               iyy="0.0287381" iyz="-6.06e-09"
+               izz="0.000160326"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_profile_700.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 -0.35" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_profile_700.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_cap.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-1.6356e-08 -0 0.0033423" rpy="-0 1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_cap.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_base.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0.0108614 -5.77328e-07 -0.650001" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_base.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_lid.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.00949929 -1.15e-10 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_lid.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_cap2.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="1.6356e-08 -0 -0.703342" rpy="0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_cap2.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_shaft.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-0.0372188 2e-12 -0.650649" rpy="-0 -1.5708 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_shaft.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Profile" type="fixed">
+    <origin xyz="-0.35 -0 -0.0541" rpy="0 -1.5708 0"/>
+    <parent link="urdf_spacer"/>
+    <child link="urdf_profile_700"/>
+  </joint>
+
+  <!-- Weight (stopper + mass) — COM offset 5 mm in Y to model real-world
+       off-axis mounting on the profile mounting plate. This creates a
+       gravity moment arm about the compliance axis (bar long axis) so the
+       torsional mode is excited both inertially and by gravity. -->
+  <link name="urdf_weight">
+    <inertial>
+      <origin xyz="0.0 0.005 0.00721586" rpy="0 0 0"/>
+      <mass value="1.037"/>
+      <inertia ixx="0.000384095" ixy="-2.829e-09" ixz="2e-12"
+               iyy="0.000384111" iyz="-1.4e-11"
+               izz="0.000710724"/>
+    </inertial>
+    <visual>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_stopper.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="-2.991e-09 1.2324e-08 0.0304031" rpy="-0 0 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight_stopper.stl"/>
+      </geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 -0 0.0055" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="../../../src/pendulum_description/meshes/urdf_weight.stl"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Weight joint: REVOLUTE compliance about the bar's long axis.
+       Joint X axis maps to profile_700's −Z (bar long axis) via the rpy
+       rotation here. ±0.1 rad limit is generous; real twist is sub-degree.
+       URDF damping only — stiffness must be added by the simulator loader
+       (see header comment for details). -->
+  <joint name="Weight" type="revolute">
+    <origin xyz="-0.0182 -0 -0.65" rpy="3.14159 1.5708 0"/>
+    <parent link="urdf_profile_700"/>
+    <child link="urdf_weight"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.1" upper="0.1" effort="100" velocity="50"/>
+    <dynamics damping="0.05" friction="0.0"/>
+  </joint>
+
+</robot>
