@@ -3,6 +3,9 @@ build/
 install/
 log/
 
+# Fetched dependencies (see scripts/setup.sh)
+third_party/onnxruntime/
+
 # Python
 __pycache__/
 *.pyc
