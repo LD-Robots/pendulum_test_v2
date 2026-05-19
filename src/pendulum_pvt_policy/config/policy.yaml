@@ -1,0 +1,31 @@
+pendulum_pvt_policy:
+  ros__parameters:
+    # ONNX model — override on the launch command line.
+    onnx_path: ""
+    joint_name: pendulum_joint
+
+    # Action mapping — must match training (env_cfg.py ActionsCfg).
+    action_scale: 2.0943951023931953   # 2π/3
+    clip_actions: 3.0
+
+    # Rates: inference matches training cadence (50 Hz); output runs faster
+    # so the drive sees small frequent setpoint steps, not 50 Hz pulses.
+    inference_rate_hz: 50.0
+    output_rate_hz: 200.0
+
+    # Master-side slew limiter on the published setpoint (rad/s).
+    target_pd_slew_rate: 5.5
+
+    # Topics
+    joint_state_topic: /joint_states
+    target_topic: /pendulum/target
+    setpoint_topic: /pendulum_pvt_controller/setpoint
+    fall_topic: /pendulum/fall_latched
+
+    # Initial target + fall safety
+    target_pos: 0.0
+    default_pos: 0.0
+    fall_vel_limit: 20.0
+    fall_pos_limit: 10.0
+    joint_state_timeout_sec: 0.05
+    policy_enabled: true

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pendulum_pvt_policy</name>
+  <version>0.1.0</version>
+  <description>ONNX inference node for the X6 pendulum PVT (Mode 5) RL policy. Runs the trained policy at 50 Hz and feeds the PendulumPVTController setpoint topic.</description>
+  <maintainer email="alex.zamfir@ldrobots.ro">Alex Zamfir</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>trajectory_msgs</depend>
+
+  <!-- policy.launch.py includes pendulum_pvt_control/pvt.launch.py -->
+  <exec_depend>pendulum_pvt_control</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

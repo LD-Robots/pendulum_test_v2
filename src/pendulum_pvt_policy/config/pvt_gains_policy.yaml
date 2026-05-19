@@ -1,0 +1,34 @@
+# PVT controller gains for RL-policy deployment (pendulum_pvt_policy).
+#
+# These MUST match the gains the policy was trained with — see
+# models/pvt_v1/README.md. The training env used a pure PVT law
+#   τ = Kp·(q_d − q) + Kd·(qd_d − qd)
+# with NO host feed-forward, so all ff_* flags are off here. The policy
+# learned to compensate gravity / inertia implicitly through its actions;
+# adding host feed-forward would double-compensate and break sim2real.
+#
+# Load this instead of pvt_gains.yaml when running the policy:
+#   ros2 launch pendulum_pvt_control pvt.launch.py gains_file:=pvt_gains_policy.yaml
+#
+# Live-tune with: ros2 param set /pendulum_pvt_controller Kp|Kd <value>
+
+pendulum_pvt_controller:
+  ros__parameters:
+    joint: pendulum_joint
+    drive_side_pd: true        # X6 runs the PD/MIT law in firmware
+
+    Kp:        200.0           # match training (models/pvt_v1) — streamed to PVT_KP
+    Kd:        12.0            # match training                 — streamed to PVT_KD
+    tau_limit: 20.0            # host feed-forward clamp (Nm) — unused (ff off)
+
+    # Feed-forward DISABLED — the RL policy already accounts for gravity /
+    # inertia in its action output. Host FF on top would double-compensate.
+    mgl:       4.10
+    J:         0.102
+    Fv:        0.05
+    comp_sign: 1.0
+    ff_gravity: false
+    ff_inertia: false
+    ff_viscous: false
+
+    hold_position: 0.0         # seed setpoint until first ~/setpoint or ~/hold
