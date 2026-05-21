@@ -2,14 +2,14 @@
 # Standalone config so the sim path never loads it (the Gazebo URDF does not
 # expose the firmware telemetry interfaces). Loaded by the spawner via
 # `--param-file`; spawned with condition use_sim:=false in every launch.
-
-controller_manager:
-  ros__parameters:
-    drive_status_broadcaster:
-      type: pendulum_pd_control/DriveStatusBroadcaster
+#
+# `type` lives inside the controller's own ros__parameters — that is where the
+# spawner's --param-file handler reads it from (controller_manager_services.py).
 
 drive_status_broadcaster:
   ros__parameters:
+    type: pendulum_pd_control/DriveStatusBroadcaster
+
     joint: pendulum_joint
 
     # State interfaces to claim and republish. Must match the named channels
