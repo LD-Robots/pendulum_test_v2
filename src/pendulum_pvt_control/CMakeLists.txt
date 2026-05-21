@@ -56,7 +56,9 @@ install(DIRECTORY config launch
   DESTINATION share/${PROJECT_NAME}
 )
 
-install(PROGRAMS scripts/pvt_goto.py
+install(PROGRAMS
+  scripts/pvt_goto.py
+  scripts/pvt_sim_gui.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

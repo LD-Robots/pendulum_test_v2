@@ -38,6 +38,11 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
 
+  <!-- pvt_sim_gui.py: offline visualiser, no ROS deps -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>python3-tk</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
     <controller_interface plugin="${prefix}/pendulum_pvt_controller_plugin.xml"/>

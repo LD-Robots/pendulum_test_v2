@@ -136,6 +136,37 @@ ros2 run pendulum_pvt_control pvt_goto.py 0.0 4.0 500
   runs its loop at 1 kHz and holds each setpoint between updates. 500–1000 Hz is
   smoother.
 
+### Offline simulation & validation — `pvt_sim_gui`
+
+Before touching hardware, `pvt_sim_gui.py` lets you *see* what a given set of
+trajectory parameters and gains produces. It is a self-contained desktop app
+(numpy + matplotlib + tkinter, **no ROS, no hardware**): it embeds the same
+quintic generator as `pvt_goto`, runs a forward physics simulation of the
+pendulum under the drive's law `tau = Kp*(q_d-q) + Kd*(qd_d-qd) + tau_ff`, and
+plots the commanded setpoint against the predicted response.
+
+```bash
+python3 src/pendulum_pvt_control/scripts/pvt_sim_gui.py   # standalone
+ros2 run pendulum_pvt_control pvt_sim_gui.py              # after colcon build
+```
+
+Edit the trajectory (`q0`, `goal`, `duration`, stream `rate`), the gains
+(`Kp`, `Kd`, `tau_limit`), the feedforward model (`mgl`, `J`, `Fv` + the
+`ff_*` toggles) and the plant physics, then hit **Run**. The four stacked plots
+show position, velocity, the torque breakdown (`Kp`/`Kd`/`tau_ff`/total, with
+the `tau_limit` and `0x6072` ceiling lines) and tracking error; the metrics
+panel reports peak speed, steady-state error, overshoot, settling time, peak
+torque and whether the ceiling / FF clamp were hit. The gains are pre-seeded
+from `config/pvt_gains.yaml`; the drive loop is modelled at 1 kHz with the
+streamed setpoint zero-order-held, so a low stream rate visibly tracks worse.
+
+Things to try: turn off `ff_gravity` and watch the steady-state droop appear;
+on a fast move (`duration` ~0.3 s) drop `Kd` to ~0.2 and watch the
+overshoot/ringing; run a fast move at `rate` 10 Hz then 1000 Hz (tick *keep
+previous run as ghost*) to compare the stair-step tracking. The gentle 2 s
+default move is deliberately well-damped — push `duration` down to excite the
+gain/rate effects.
+
 ### Mode services
 
 ```bash
