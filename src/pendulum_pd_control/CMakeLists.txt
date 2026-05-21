@@ -18,6 +18,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
@@ -30,6 +31,7 @@ set(DEPS
   rclcpp_lifecycle
   realtime_tools
   diagnostic_msgs
+  sensor_msgs
   std_msgs
   std_srvs
   trajectory_msgs
@@ -38,6 +40,7 @@ set(DEPS
 add_library(${PROJECT_NAME} SHARED
   src/pendulum_pd_controller.cpp
   src/drive_status_broadcaster.cpp
+  src/filtered_joint_state_broadcaster.cpp
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

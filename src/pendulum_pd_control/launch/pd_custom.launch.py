@@ -30,6 +30,7 @@ def generate_launch_description():
     controllers_yaml  = os.path.join(pkg_share, 'config', 'controllers_custom.yaml')
     pd_gains_yaml     = os.path.join(pkg_share, 'config', 'pd_gains.yaml')
     drive_status_yaml = os.path.join(pkg_share, 'config', 'drive_status_broadcaster.yaml')
+    filtered_jsb_yaml = os.path.join(pkg_share, 'config', 'filtered_joint_state_broadcaster.yaml')
     slave_yaml        = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive.yaml')
 
     use_sim = LaunchConfiguration('use_sim')
@@ -103,6 +104,15 @@ def generate_launch_description():
         arguments=['drive_status_broadcaster', '--param-file', drive_status_yaml],
         output='screen',
     )
+    # Host-side filtered joint state — real hardware only (sim has no effort
+    # state interface). Publishes a low-pass-filtered velocity/effort
+    # sensor_msgs/JointState on /filtered_joint_states.
+    filtered_jsb_spawner = Node(
+        package='controller_manager', executable='spawner',
+        condition=UnlessCondition(use_sim),
+        arguments=['filtered_joint_state_broadcaster', '--param-file', filtered_jsb_yaml],
+        output='screen',
+    )
 
     # Spawn the PD controller only after JSB is up, so the cm is responsive.
     pd_after_jsb = RegisterEventHandler(
@@ -110,6 +120,9 @@ def generate_launch_description():
     )
     drive_status_after_jsb = RegisterEventHandler(
         OnProcessExit(target_action=jsb_spawner, on_exit=[drive_status_spawner])
+    )
+    filtered_jsb_after_jsb = RegisterEventHandler(
+        OnProcessExit(target_action=jsb_spawner, on_exit=[filtered_jsb_spawner])
     )
 
     return LaunchDescription([
@@ -119,4 +132,5 @@ def generate_launch_description():
         jsb_spawner,
         pd_after_jsb,
         drive_status_after_jsb,
+        filtered_jsb_after_jsb,
     ])

@@ -1,0 +1,26 @@
+# Host-side filtered joint state — real hardware only.
+# Low-pass-filters the joint velocity (raw 0x606C) and effort (raw 0x6077) from
+# TxPDO 0x1A02 and republishes them as a sensor_msgs/JointState. The drive's own
+# "Filtered Velocity" (0x200D) / "Filtered Torque" (0x200F) objects are not
+# carried by any TxPDO on this firmware, so they are reproduced host-side here.
+# Standalone config so the sim path never loads it (the Gazebo URDF does not
+# expose the effort state interface). Loaded by the spawner via `--param-file`;
+# spawned with condition use_sim:=false in every launch.
+#
+# `type` lives inside the controller's own ros__parameters — that is where the
+# spawner's --param-file handler reads it from (controller_manager_services.py).
+
+filtered_joint_state_broadcaster:
+  ros__parameters:
+    type: pendulum_pd_control/FilteredJointStateBroadcaster
+
+    joint: pendulum_joint
+
+    # First-order low-pass cutoff for each channel (Hz). Live-tunable via
+    # `ros2 param set`; <= 0 disables filtering (raw passthrough). The filter
+    # runs at the full 1 kHz control rate regardless of publish_rate.
+    velocity_cutoff_hz: 30.0
+    torque_cutoff_hz:   30.0
+
+    publish_rate: 1000.0            # Hz — publish every control cycle (full-rate, no decimation)
+    topic: filtered_joint_states    # relative — resolves to /filtered_joint_states

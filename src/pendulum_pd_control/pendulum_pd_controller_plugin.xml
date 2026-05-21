@@ -20,4 +20,15 @@
       and bundles them into one thresholded diagnostic_msgs/DiagnosticArray.
     </description>
   </class>
+  <class
+    name="pendulum_pd_control/FilteredJointStateBroadcaster"
+    type="pendulum_pd_control::FilteredJointStateBroadcaster"
+    base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Host-side low-pass filter for joint velocity and effort. Reproduces the
+      drive's filtered velocity/torque — which are not PDO-mapped — from the raw
+      telemetry and publishes them as a sensor_msgs/JointState. Position is
+      passed through unfiltered. No command interfaces.
+    </description>
+  </class>
 </library>
