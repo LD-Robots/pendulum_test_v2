@@ -62,4 +62,10 @@ install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Python helper scripts — installed executable so `ros2 run` finds them.
+install(PROGRAMS
+  scripts/random_target_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
