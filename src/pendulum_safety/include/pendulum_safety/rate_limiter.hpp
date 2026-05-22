@@ -18,6 +18,8 @@ public:
   /// Limit `desired` so the emitted command respects `slew_rate` (rad/s, the
   /// first derivative) and `accel_limit` (rad/s^2, the second derivative).
   /// A non-positive `slew_rate` or `accel_limit` disables that layer.
+  /// The profile is deceleration-aware: it brakes early enough to settle on
+  /// the target without overshoot or ringing, even for a large step input.
   /// \param desired      target position for this cycle
   /// \param dt           seconds since the previous call
   /// \param slew_rate    maximum command velocity magnitude

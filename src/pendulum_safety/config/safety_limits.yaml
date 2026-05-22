@@ -26,7 +26,7 @@
       sustained_effort_window_sec: 1.0  # s above threshold => e-stop
       # 3.3 velocity
       velocity_limit: 3.0             # rad/s — URDF velocity limit
-      slew_rate_limit: 5.5              # rad/s — position-command slew
+      slew_rate_limit: 2.5             # rad/s — position-command slew
       acceleration_limit: 60.0          # rad/s^2 — command acceleration cap
       # 3.4 temperature / bus voltage
       motor_temp_warn: 70.0             # degC  — start derating Kp
@@ -59,7 +59,7 @@ pendulum_safety_supervisor:
     # this long — bringup transients then cannot latch a spurious e-stop.
     startup_grace_sec: 2.0
     action.temperature: free
-    action.overspeed: free
+    action.overspeed: hold
     action.position: hold
     action.manual: free
     action.stale_joint_state: hold
