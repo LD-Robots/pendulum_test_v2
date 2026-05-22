@@ -65,8 +65,7 @@ telemetry, latches the **first** breach, and drives the e-stop.
 
 | Topic | Type | Used for |
 |-------|------|----------|
-| `/joint_states` | `sensor_msgs/JointState` | position + velocity |
-| `/filtered_joint_states` (real) / `/joint_states` (sim) | `sensor_msgs/JointState` | effort (sustained-effort monitor) |
+| `/joint_states` | `sensor_msgs/JointState` | position + velocity, **and** effort — the drive's actual torque (EtherCAT `0x6077`) on real hardware, the gz effort in sim — for the sustained-effort monitor |
 | `/drive_status_broadcaster/motor_temperature` | `std_msgs/Float64` | motor over-temp (real only) |
 | `/drive_status_broadcaster/drive_temperature` | `std_msgs/Float64` | drive over-temp (real only) |
 | `/drive_status_broadcaster/bus_voltage` | `std_msgs/Float64` | bus-voltage window (real only) |

@@ -46,7 +46,10 @@ pendulum_safety_supervisor:
   ros__parameters:
     joint_name: pendulum_joint
     joint_state_topic: /joint_states
-    effort_topic: /filtered_joint_states
+    # /joint_states carries the drive's actual torque in its effort field
+    # (EtherCAT 0x6077 -> effort state interface) on every launch path;
+    # /filtered_joint_states is only spawned by the PD launch.
+    effort_topic: /joint_states
     monitor_temperature: true
     temperature_topic_motor: /drive_status_broadcaster/motor_temperature
     temperature_topic_drive: /drive_status_broadcaster/drive_temperature

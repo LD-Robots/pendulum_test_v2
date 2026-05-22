@@ -6,7 +6,7 @@ Standalone:
 
 Also included by pvt.launch.py / pd_custom.launch.py (which forward use_sim).
 Simulation has no temperature interfaces, so temperature monitoring is disabled
-and the effort source falls back to /joint_states.
+there (derived from use_sim).
 """
 
 import os
@@ -36,11 +36,9 @@ def generate_launch_description():
                 # Simulation has no temperature interfaces.
                 'monitor_temperature': PythonExpression(
                     ["'", use_sim, "' == 'false'"]),
-                # Real hardware exposes filtered effort on /filtered_joint_states;
-                # Gazebo populates effort directly on /joint_states.
-                'effort_topic': PythonExpression(
-                    ["'/joint_states' if '", use_sim,
-                     "' == 'true' else '/filtered_joint_states'"]),
+                # effort_topic stays /joint_states (from safety_limits.yaml) —
+                # it carries the drive's actual torque (0x6077) on real
+                # hardware and the gz effort in sim, on every launch path.
             },
         ],
     )

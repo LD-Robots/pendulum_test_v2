@@ -55,7 +55,7 @@ SafetySupervisor::SafetySupervisor(const rclcpp::NodeOptions & options)
   const std::string joint_state_topic =
     declare_parameter<std::string>("joint_state_topic", "/joint_states");
   const std::string effort_topic =
-    declare_parameter<std::string>("effort_topic", "/filtered_joint_states");
+    declare_parameter<std::string>("effort_topic", "/joint_states");
   monitor_temperature_ = declare_parameter<bool>("monitor_temperature", true);
   const std::string motor_topic = declare_parameter<std::string>(
     "temperature_topic_motor", "/drive_status_broadcaster/motor_temperature");
