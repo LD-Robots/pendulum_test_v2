@@ -1,0 +1,59 @@
+# pendulum_safety — single source of truth for every safety limit.
+#
+# Loaded by all four safety consumers:
+#   - pendulum_safety_supervisor  (full set + the supervisor-only block below)
+#   - pendulum_pd_controller      (safety.* — via an extra --param-file)
+#   - pendulum_pvt_controller     (safety.* — via an extra --param-file)
+#   - pendulum_pvt_policy         (safety.* — via parameters in policy.launch.py)
+#
+# The /**: wildcard means the same file applies to whatever node it is passed
+# to. Keep this file the ONLY place limit numbers are edited.
+#
+# NOTE: the limit values are wired into the supervisor and the controllers in
+# Phases B-D; in the Phase A scaffolding only the supervisor-only block is
+# actually consumed.
+
+/**:
+  ros__parameters:
+    safety:
+      # 3.1 position
+      position_limits_enable: true
+      position_min: 0.0                 # rad   — URDF joint lower
+      position_max: 6.283185307179586   # rad   — URDF joint upper (2*pi)
+      # 3.2 effort
+      effort_limit: 20.0                # Nm    — URDF effort limit (was tau_limit)
+      sustained_effort_threshold: 16.0  # Nm
+      sustained_effort_window_sec: 1.0  # s above threshold => e-stop
+      # 3.3 velocity
+      velocity_limit: 16.02             # rad/s — URDF velocity limit
+      slew_rate_limit: 5.5              # rad/s — position-command slew
+      acceleration_limit: 60.0          # rad/s^2 — command acceleration cap
+      # 3.4 temperature / bus voltage
+      motor_temp_warn: 70.0             # degC  — start derating Kp
+      motor_temp_error: 90.0            # degC  — e-stop
+      drive_temp_warn: 70.0             # degC
+      drive_temp_error: 85.0            # degC
+      bus_voltage_min: 40.0             # V
+      bus_voltage_max: 54.0             # V
+      kp_scale_floor: 0.3               # Kp multiplier at/above error temp
+      # watchdog
+      joint_state_timeout_sec: 0.05     # s     — /joint_states freshness
+
+# Supervisor-only parameters. Targeted by node name so they do not leak onto
+# the controllers. Each action is "free" (zero torque) or "hold" (lock pos).
+pendulum_safety_supervisor:
+  ros__parameters:
+    joint_name: pendulum_joint
+    joint_state_topic: /joint_states
+    effort_topic: /filtered_joint_states
+    monitor_temperature: true
+    temperature_topic_motor: /drive_status_broadcaster/motor_temperature
+    temperature_topic_drive: /drive_status_broadcaster/drive_temperature
+    bus_voltage_topic: /drive_status_broadcaster/bus_voltage
+    watchdog_rate_hz: 200.0
+    action.temperature: free
+    action.overspeed: free
+    action.position: hold
+    action.manual: free
+    action.stale_joint_state: hold
+    action.sustained_effort: free

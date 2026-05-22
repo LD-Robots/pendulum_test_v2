@@ -1,0 +1,46 @@
+#ifndef PENDULUM_SAFETY__RATE_LIMITER_HPP_
+#define PENDULUM_SAFETY__RATE_LIMITER_HPP_
+
+namespace pendulum_safety
+{
+
+/// Stateful slew-rate and acceleration limiter for a single position-command
+/// stream. Realtime-safe: a handful of scalars, no allocation, no locking.
+///
+/// One instance per command stream. The first limit() call after construction
+/// or reset() seeds the internal state to the requested value, so there is no
+/// startup jump.
+class RateLimiter
+{
+public:
+  RateLimiter() = default;
+
+  /// Limit `desired` so the emitted command respects `slew_rate` (rad/s, the
+  /// first derivative) and `accel_limit` (rad/s^2, the second derivative).
+  /// A non-positive `slew_rate` or `accel_limit` disables that layer.
+  /// \param desired      target position for this cycle
+  /// \param dt           seconds since the previous call
+  /// \param slew_rate    maximum command velocity magnitude
+  /// \param accel_limit  maximum command acceleration magnitude
+  /// \return the rate-limited position command
+  double limit(double desired, double dt, double slew_rate, double accel_limit);
+
+  /// Forget all state; the next limit() call re-seeds (use on (re)activation).
+  void reset();
+
+  /// Explicitly seed the internal state to a known position (use when
+  /// entering a HOLD so the hold transition is itself rate-limited).
+  void seed(double position);
+
+  /// True once the limiter has been seeded by a limit() or seed() call.
+  bool seeded() const { return seeded_; }
+
+private:
+  bool   seeded_ = false;
+  double prev_cmd_ = 0.0;   ///< last emitted command position
+  double prev_vel_ = 0.0;   ///< last emitted command velocity
+};
+
+}  // namespace pendulum_safety
+
+#endif  // PENDULUM_SAFETY__RATE_LIMITER_HPP_
