@@ -152,7 +152,8 @@ ros2 run pendulum_pvt_control pvt_sim_gui.py              # after colcon build
 
 Edit the trajectory (`q0`, `goal`, `duration`, stream `rate`), the gains
 (`Kp`, `Kd`, `tau_limit`), the feedforward model (`mgl`, `J`, `Fv` + the
-`ff_*` toggles) and the plant physics, then hit **Run**. The four stacked plots
+`ff_*` toggles), the plant physics and an optional external position block,
+then hit **Run**. The four stacked plots
 show position, velocity, the torque breakdown (`Kp`/`Kd`/`tau_ff`/total, with
 the `tau_limit` and `0x6072` ceiling lines) and tracking error; the metrics
 panel reports peak speed, steady-state error, overshoot, settling time, peak
@@ -165,7 +166,12 @@ on a fast move (`duration` ~0.3 s) drop `Kd` to ~0.2 and watch the
 overshoot/ringing; run a fast move at `rate` 10 Hz then 1000 Hz (tick *keep
 previous run as ghost*) to compare the stair-step tracking. The gentle 2 s
 default move is deliberately well-damped — push `duration` down to excite the
-gain/rate effects.
+gain/rate effects. Tick *external position block* to pin the joint for a
+window (`block start` / `block duration`) and watch the drive torque saturate
+against the stall, then snap to catch up on release. Then press *pvt_goto
+hold fix* and Run again — a following-error governor pauses the trajectory
+whenever the joint lags past `lag limit`, so the setpoint can't run away and
+the violent catch-up collapses; the ghost overlays the un-mitigated run.
 
 ### Mode services
 

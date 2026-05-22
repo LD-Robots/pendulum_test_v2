@@ -43,6 +43,7 @@ DEFAULTS = {
     "goal": 1.0,       # goal position (rad)
     "duration": 2.0,   # trajectory duration (s)
     "rate": 200.0,     # setpoint stream rate (Hz)
+    "err_max": 0.05,   # pvt_goto hold fix: trajectory-pause lag limit (rad)
     "Kp": 22.95,       # stiffness (Nm/rad)
     "Kd": 2.14,        # damping (Nm.s/rad)
     "tau_limit": 20.0, # symmetric clamp on the feedforward (Nm); <=0 disables
@@ -53,6 +54,8 @@ DEFAULTS = {
     "friction": 0.33,  # plant Coulomb friction (Nm)
     "eps": 0.05,       # Coulomb friction smoothing velocity (rad/s)
     "ceiling": 21.5,   # hard drive torque ceiling (Nm)
+    "block_start": 0.8,  # external-force block engages at this time (s)
+    "block_dur": 0.6,    # external-force block holds this long, then releases (s)
 }
 
 FLAG_DEFAULTS = {
@@ -60,6 +63,7 @@ FLAG_DEFAULTS = {
     "ff_inertia": True,
     "ff_viscous": False,
     "ceiling_enabled": True,
+    "block_enabled": False,
 }
 
 DT_SIM = 0.001  # drive loop period (s) — the 0x60C2 interpolation time = 1 ms
@@ -94,8 +98,23 @@ def simulate(p):
     steps = max(1, int(duration * rate))
     sp_pos, sp_vel, sp_acc = quintic_trajectory(p["q0"], p["goal"], duration, rate)
 
-    # Run past the trajectory end so steady-state hold / settling is visible.
+    # External-force block window — pins the joint for [start, start+dur).
+    block_on = p["block_enabled"]
+    block_start = p["block_start"]
+    block_end = block_start + p["block_dur"]
+
+    # pvt_goto hold fix — a following-error governor: when on, the trajectory
+    # clock stops advancing (and commands a zero-velocity hold) whenever the
+    # joint lags by more than err_max, so the setpoint cannot run away during
+    # a stall and there is no excessive catch-up velocity on release.
+    mitigate = p.get("mitigate", False)
+    err_max = p["err_max"]
+
+    # Run past the trajectory end (and past any block release / governor
+    # pause) so the steady-state hold / settling / catch-up stays visible.
     total = duration + max(1.0, 0.5 * duration)
+    if block_on:
+        total = max(total, block_end + 1.0, duration + p["block_dur"] + 1.0)
     n = int(total / DT_SIM) + 1
 
     t = np.arange(n) * DT_SIM
@@ -122,14 +141,39 @@ def simulate(p):
 
     state_q = p["q0"]
     state_qd = 0.0
+    traj_phase = 0.0        # governed trajectory time (s) — the hold-fix clock
+    lost_t = 0.0            # trajectory time given up to the governor slowdown
 
     for k in range(n):
-        # Zero-order-hold: hold the most recent streamed sample. The +1e-9
-        # nudge absorbs float-division rounding — without it an exact grid
-        # crossing (e.g. rate=1000 against the 1 kHz sim) flips int() one
-        # step early and the held setpoint stalls/double-steps.
-        idx = min(int(k * DT_SIM / dt_stream + 1e-9), steps)
-        sq, sv, sa = sp_pos[idx], sp_vel[idx], sp_acc[idx]
+        # External force pinning the joint for a fixed window: the measured
+        # velocity drops to 0 and the position stays frozen, while the drive
+        # torque still computes against the growing position error.
+        blocking = block_on and block_start <= k * DT_SIM < block_end
+        if blocking:
+            state_qd = 0.0
+
+        # Zero-order-hold of the streamed quintic, sampled by the governed
+        # trajectory clock traj_phase. The +1e-9 nudge absorbs float-division
+        # rounding (an exact grid crossing — e.g. rate=1000 against the 1 kHz
+        # sim — would otherwise flip int() a step early).
+        #
+        # pvt_goto hold fix: a following-error governor scales the clock by a
+        # smooth speed factor f in [0, 1] — full speed while the joint keeps
+        # up, ramping linearly to a standstill as the lag grows from err_max/2
+        # to err_max. q_d then cannot run away during a stall and qd_d scales
+        # down with it, so the trajectory eases back in on release instead of
+        # snapping — and the factor is continuous, so the command never jumps.
+        idx = min(int(traj_phase / dt_stream + 1e-9), steps)
+        raw_q, raw_v, raw_a = sp_pos[idx], sp_vel[idx], sp_acc[idx]
+        if mitigate:
+            lag = abs(raw_q - state_q)
+            f = (err_max - lag) / (0.5 * err_max)
+            f = 0.0 if f < 0.0 else (1.0 if f > 1.0 else f)
+        else:
+            f = 1.0
+        sq, sv, sa = raw_q, f * raw_v, f * raw_a
+        traj_phase += f * DT_SIM
+        lost_t += (1.0 - f) * DT_SIM
 
         # Host feedforward — uses live measured q/qd and the held commanded acc.
         g = mgl * math.sin(state_q) if ff_g else 0.0
@@ -167,9 +211,10 @@ def simulate(p):
         tau_drive[k] = drive
         ff_clamped[k] = ff != ff_raw
 
-        # Semi-implicit (symplectic) Euler.
-        state_qd = state_qd + qdd * DT_SIM
-        state_q = state_q + state_qd * DT_SIM
+        # Semi-implicit (symplectic) Euler — skipped while the joint is pinned.
+        if not blocking:
+            state_qd = state_qd + qdd * DT_SIM
+            state_q = state_q + state_qd * DT_SIM
 
     return {
         "t": t, "q": q, "qd": qd,
@@ -178,6 +223,7 @@ def simulate(p):
         "tau_ff": tau_ff, "tau_ff_raw": tau_ff_raw, "tau_drive": tau_drive,
         "ff_clamped": ff_clamped, "ceiling_hit": ceiling_hit,
         "duration": duration, "dq": p["goal"] - p["q0"],
+        "delayed_t": lost_t,
     }
 
 
@@ -237,6 +283,24 @@ def compute_metrics(res, p):
     traj = t <= duration
     rms = float(np.sqrt(np.mean((q_d[traj] - q[traj]) ** 2)))
     lines.append(f"RMS pos error (0..T)    : {rms:8.5f} rad")
+
+    if p.get("mitigate", False):
+        lines.append(f"pvt_goto hold fix       : ON  (lag<={p['err_max']:.3f} rad,"
+                     f" traj delayed {res.get('delayed_t', 0.0):.2f} s)")
+    else:
+        lines.append("pvt_goto hold fix       : off")
+
+    if p["block_enabled"]:
+        b0 = p["block_start"]
+        b1 = b0 + p["block_dur"]
+        bmask = (t >= b0) & (t < b1)
+        if bmask.any():
+            blk_tau = float(np.max(np.abs(res["tau_drive"][bmask])))
+            blk_lag = float(np.max(np.abs((q_d - q)[bmask])))
+            lines.append(f"external block          : t={b0:.2f}..{b1:.2f} s")
+            lines.append(f"  peak|tau| / pos lag    : {blk_tau:7.3f} Nm /{blk_lag:8.4f} rad")
+        else:
+            lines.append(f"external block          : t={b0:.2f}..{b1:.2f} s (outside sim)")
     return "\n".join(lines)
 
 
@@ -280,6 +344,7 @@ PARAM_GROUPS = [
         ("goal", "goal (rad)"),
         ("duration", "duration (s)"),
         ("rate", "stream rate (Hz)"),
+        ("err_max", "lag limit (rad)"),
     ]),
     ("Controller gains", [
         ("Kp", "Kp (Nm/rad)"),
@@ -297,6 +362,10 @@ PARAM_GROUPS = [
         ("eps", "friction eps (rad/s)"),
         ("ceiling", "torque ceiling (Nm)"),
     ]),
+    ("External block", [
+        ("block_start", "block start (s)"),
+        ("block_dur", "block duration (s)"),
+    ]),
 ]
 
 FLAG_LABELS = [
@@ -304,6 +373,7 @@ FLAG_LABELS = [
     ("ff_inertia", "inertia feedforward"),
     ("ff_viscous", "viscous feedforward"),
     ("ceiling_enabled", "enforce torque ceiling"),
+    ("block_enabled", "external position block"),
 ]
 
 
@@ -318,6 +388,7 @@ class PvtSimApp:
         self.ghost = None
         self.last_res = None
         self.last_p = None
+        self.mitigate = False  # pvt_goto hold fix — toggled by its button
         self._build_ui()
         self.run()  # initial render
 
@@ -350,18 +421,24 @@ class PvtSimApp:
                         variable=self.ghost_var).pack(anchor=tk.W)
 
         btns = ttk.Frame(left)
-        btns.pack(fill=tk.X, pady=8)
+        btns.pack(fill=tk.X, pady=(8, 2))
         ttk.Button(btns, text="Run / Compute", command=self.run).pack(
             side=tk.LEFT, expand=True, fill=tk.X, padx=1)
         ttk.Button(btns, text="Reset", command=self.reset).pack(side=tk.LEFT, padx=1)
         ttk.Button(btns, text="Clear ghost", command=self.clear_ghost).pack(
             side=tk.LEFT, padx=1)
 
+        # pvt_goto hold fix: toggles the following-error governor and stashes
+        # the current run as a ghost, so the next Run overlays pre-fix vs post-fix.
+        self.mitigate_btn = ttk.Button(left, text="pvt_goto hold fix:  OFF",
+                                       command=self.toggle_mitigation)
+        self.mitigate_btn.pack(fill=tk.X, pady=(0, 6))
+
         self.fig = Figure(figsize=(7.5, 8.0), dpi=100)
         self.axes = self.fig.subplots(4, 1, sharex=True)
         self.canvas = FigureCanvasTkAgg(self.fig, master=right)
 
-        self.metrics = tk.Text(right, height=11, font="TkFixedFont",
+        self.metrics = tk.Text(right, height=13, font="TkFixedFont",
                                wrap=tk.NONE, state=tk.DISABLED, bg="#f4f4f4")
         self.metrics.pack(side=tk.BOTTOM, fill=tk.X)
         NavigationToolbar2Tk(self.canvas, right).update()
@@ -393,6 +470,10 @@ class PvtSimApp:
         if p["eps"] <= 0.0:
             messagebox.showerror("Invalid input", "friction eps must be > 0")
             return None
+        if p["err_max"] <= 0.0:
+            messagebox.showerror("Invalid input", "lag limit (err_max) must be > 0")
+            return None
+        p["mitigate"] = self.mitigate
         return p
 
     def run(self):
@@ -413,6 +494,19 @@ class PvtSimApp:
             entry.insert(0, str(DEFAULTS[key]))
         for key, var in self.flags.items():
             var.set(FLAG_DEFAULTS[key])
+        self.mitigate = False
+        self.mitigate_btn.config(text="pvt_goto hold fix:  OFF")
+        self.run()
+
+    def toggle_mitigation(self):
+        """Toggle the pvt_goto hold fix, stash the current run as a ghost, and
+        re-run — so the plot overlays pre-fix (ghost) against post-fix (latest).
+        """
+        self.mitigate = not self.mitigate
+        self.mitigate_btn.config(
+            text=f"pvt_goto hold fix:  {'ON' if self.mitigate else 'OFF'}")
+        if self.last_res is not None:
+            self.ghost = self.last_res
         self.run()
 
     def clear_ghost(self):
@@ -476,9 +570,15 @@ class PvtSimApp:
         ax_err.set_ylabel("tracking\nerror")
         ax_err.set_xlabel("time (s)")
 
-        for ax in self.axes:
+        block_on = p["block_enabled"]
+        b0 = p["block_start"]
+        b1 = b0 + p["block_dur"]
+        for i, ax in enumerate(self.axes):
             ax.axvline(res["duration"], color="purple", ls=":", lw=1.0,
                        alpha=0.6)
+            if block_on:
+                ax.axvspan(b0, b1, color="red", alpha=0.10,
+                           label="external block" if i == 0 else "_nolegend_")
             ax.grid(True, alpha=0.3)
             ax.legend(loc="best", fontsize=7, ncol=2)
 
