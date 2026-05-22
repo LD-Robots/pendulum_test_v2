@@ -17,6 +17,9 @@
   <!-- policy.launch.py includes pendulum_pvt_control/pvt.launch.py -->
   <exec_depend>pendulum_pvt_control</exec_depend>
 
+  <!-- scripts/random_target_publisher.py -->
+  <exec_depend>rclpy</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
   </export>

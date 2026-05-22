@@ -66,6 +66,10 @@ def generate_launch_description():
     policy_enabled_arg = DeclareLaunchArgument(
         'policy_enabled', default_value='true',
         description='Run inference (true) or pass user_target through (false).')
+    debug_arg = DeclareLaunchArgument(
+        'debug', default_value='false',
+        description='true → policy node logs the observation vector each '
+                    'inference tick. Default off (quiet).')
 
     # PVT controller stack — launched untouched (its own pvt_gains.yaml).
     pvt_stack = IncludeLaunchDescription(
@@ -99,6 +103,7 @@ def generate_launch_description():
                 'onnx_path': LaunchConfiguration('onnx_path'),
                 'target_pos': LaunchConfiguration('target_pos'),
                 'policy_enabled': LaunchConfiguration('policy_enabled'),
+                'debug': LaunchConfiguration('debug'),
             },
         ],
     )
@@ -108,6 +113,7 @@ def generate_launch_description():
         use_sim_arg,
         target_pos_arg,
         policy_enabled_arg,
+        debug_arg,
         pvt_stack,
         apply_policy_gains,
         policy_node,

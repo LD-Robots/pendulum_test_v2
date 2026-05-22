@@ -73,6 +73,9 @@ private:
   std::string joint_name_;
   double action_scale_{2.0 * 3.14159265358979323846 / 3.0};   // 2π/3
   double clip_actions_{3.0};
+  bool debug_{false};   // when true, log the observation vector each inference
+
+
   double joint_state_timeout_sec_{0.05};
   double output_dt_{1.0 / 200.0};
 

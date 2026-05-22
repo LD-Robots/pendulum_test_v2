@@ -21,6 +21,7 @@ PvtPolicyNode::PvtPolicyNode(const rclcpp::NodeOptions & options)
   // --- Action / policy (match training env_cfg.py) ---
   action_scale_ = declare_parameter<double>("action_scale", 2.0 * M_PI / 3.0);
   clip_actions_ = declare_parameter<double>("clip_actions", 3.0);
+  debug_ = declare_parameter<bool>("debug", false);
   const double inference_rate_hz =
     declare_parameter<double>("inference_rate_hz", 50.0);
   const double output_rate_hz =
@@ -237,13 +238,16 @@ void PvtPolicyNode::onInferenceTick()
   target_pd_goal_.store(target_pd_goal);
   have_target_pd_goal_.store(true);
 
-  RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
-    "obs=[err/π=%.3f vel/16=%.3f sin=%.3f cos=%.3f "
-    "a-3=%.3f a-2=%.3f a-1=%.3f a0=%.3f] -> raw_a=%.4f "
-    "(pos=%.4f vel=%.4f utgt=%.4f goal=%.4f)",
-    obs_[0], obs_[1], obs_[2], obs_[3],
-    obs_[4], obs_[5], obs_[6], obs_[7],
-    raw_action, pos, vel, user_target_.load(), target_pd_goal);
+  // Observation dump — only with the `debug` parameter (off by default).
+  if (debug_) {
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+      "obs=[err/π=%.3f vel/16=%.3f sin=%.3f cos=%.3f "
+      "a-3=%.3f a-2=%.3f a-1=%.3f a0=%.3f] -> raw_a=%.4f "
+      "(pos=%.4f vel=%.4f utgt=%.4f goal=%.4f)",
+      obs_[0], obs_[1], obs_[2], obs_[3],
+      obs_[4], obs_[5], obs_[6], obs_[7],
+      raw_action, pos, vel, user_target_.load(), target_pd_goal);
+  }
 }
 
 void PvtPolicyNode::onOutputTick()
