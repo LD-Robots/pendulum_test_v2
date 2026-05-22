@@ -47,7 +47,8 @@ SafetySupervisor::SafetySupervisor(const rclcpp::NodeOptions & options)
 : rclcpp::Node("pendulum_safety_supervisor", options),
   position_(kNaN), velocity_(kNaN), effort_(kNaN),
   motor_temp_(kNaN), drive_temp_(kNaN), bus_voltage_(kNaN),
-  last_joint_state_(0, 0, RCL_ROS_TIME)
+  last_joint_state_(0, 0, RCL_ROS_TIME),
+  warmup_start_(0, 0, RCL_ROS_TIME)
 {
   // --- parameters ---
   joint_name_ = declare_parameter<std::string>("joint_name", "pendulum_joint");
@@ -66,6 +67,7 @@ SafetySupervisor::SafetySupervisor(const rclcpp::NodeOptions & options)
   if (watchdog_rate_hz_ <= 0.0) {
     watchdog_rate_hz_ = 200.0;
   }
+  startup_grace_sec_ = declare_parameter<double>("startup_grace_sec", 2.0);
   report_period_cycles_ =
     std::max(1, static_cast<int>(std::lround(watchdog_rate_hz_ / 10.0)));
 
@@ -268,11 +270,32 @@ void SafetySupervisor::publishEstopState()
 void SafetySupervisor::onWatchdog()
 {
   const double dt = 1.0 / watchdog_rate_hz_;
-  const bool effort_tripped = effort_monitor_.update(
-    std::abs(effort_), dt, limits_.sustained_effort_threshold,
-    limits_.sustained_effort_window_sec);
 
-  if (!estop_latched_) {
+  // Arm breach detection only after the joint-state feed has been continuously
+  // fresh for startup_grace_sec. A bringup transient — EtherCAT reaching OP,
+  // controller activation — must not latch a spurious e-stop. Once armed the
+  // supervisor stays armed; a later gap is then a genuine breach.
+  if (!detection_armed_) {
+    const bool fresh = joint_state_received_ &&
+      (now() - last_joint_state_).seconds() <= limits_.joint_state_timeout_sec;
+    if (fresh) {
+      if (!warmup_started_) {
+        warmup_start_ = now();
+        warmup_started_ = true;
+      } else if ((now() - warmup_start_).seconds() >= startup_grace_sec_) {
+        detection_armed_ = true;
+        RCLCPP_INFO(get_logger(), "safety detection armed — joint feed healthy");
+      }
+    } else {
+      warmup_started_ = false;   // feed not healthy yet — restart the streak
+    }
+    effort_monitor_.reset();     // don't accumulate effort before arming
+  }
+
+  if (detection_armed_ && !estop_latched_) {
+    const bool effort_tripped = effort_monitor_.update(
+      std::abs(effort_), dt, limits_.sustained_effort_threshold,
+      limits_.sustained_effort_window_sec);
     BreachReason reason = detectBreach();
     if (reason == BreachReason::NONE && effort_tripped) {
       reason = BreachReason::SUSTAINED_EFFORT;
@@ -353,7 +376,9 @@ void SafetySupervisor::publishDiagnostics(double kp_scale)
       to_string(latched_action_) + ")";
   } else {
     status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-    status.message = "OK";
+    status.message = detection_armed_
+      ? "OK"
+      : "warming up — breach detection not yet armed";
   }
 
   const auto kv = [&status](const std::string & key, const std::string & value) {
@@ -370,6 +395,7 @@ void SafetySupervisor::publishDiagnostics(double kp_scale)
     kv("drive_temp", std::to_string(drive_temp_));
     kv("bus_voltage", std::to_string(bus_voltage_));
   }
+  kv("detection_armed", detection_armed_ ? "true" : "false");
   kv("kp_scale", std::to_string(kp_scale));
   kv("effort_accum_sec",
     std::to_string(effort_monitor_.timeAboveThreshold()));

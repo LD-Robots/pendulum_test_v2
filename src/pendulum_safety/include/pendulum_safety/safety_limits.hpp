@@ -60,7 +60,7 @@ struct SafetyLimits
   double kp_scale_floor   = 0.3;               ///< Kp multiplier at/above error
 
   // watchdog
-  double joint_state_timeout_sec = 0.05;       ///< s — /joint_states freshness
+  double joint_state_timeout_sec = 0.25;       ///< s — /joint_states freshness
 };
 
 /// Human-readable name for a breach reason (string literal, no allocation).

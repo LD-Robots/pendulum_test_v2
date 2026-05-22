@@ -25,7 +25,7 @@
       sustained_effort_threshold: 16.0  # Nm
       sustained_effort_window_sec: 1.0  # s above threshold => e-stop
       # 3.3 velocity
-      velocity_limit: 16.02             # rad/s — URDF velocity limit
+      velocity_limit: 3.0             # rad/s — URDF velocity limit
       slew_rate_limit: 5.5              # rad/s — position-command slew
       acceleration_limit: 60.0          # rad/s^2 — command acceleration cap
       # 3.4 temperature / bus voltage
@@ -37,7 +37,8 @@
       bus_voltage_max: 54.0             # V
       kp_scale_floor: 0.3               # Kp multiplier at/above error temp
       # watchdog
-      joint_state_timeout_sec: 0.05     # s     — /joint_states freshness
+      joint_state_timeout_sec: 0.25     # s     — /joint_states freshness
+                                        #         (latching e-stop on a dead feed)
 
 # Supervisor-only parameters. Targeted by node name so they do not leak onto
 # the controllers. Each action is "free" (zero torque) or "hold" (lock pos).
@@ -51,6 +52,9 @@ pendulum_safety_supervisor:
     temperature_topic_drive: /drive_status_broadcaster/drive_temperature
     bus_voltage_topic: /drive_status_broadcaster/bus_voltage
     watchdog_rate_hz: 200.0
+    # Breach detection arms only after the joint feed is continuously fresh for
+    # this long — bringup transients then cannot latch a spurious e-stop.
+    startup_grace_sec: 2.0
     action.temperature: free
     action.overspeed: free
     action.position: hold

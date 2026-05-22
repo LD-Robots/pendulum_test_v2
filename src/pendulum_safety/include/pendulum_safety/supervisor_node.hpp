@@ -87,6 +87,15 @@ private:
   SustainedEffortMonitor effort_monitor_;
   int cycle_count_{0};
 
+  // --- startup arming ---
+  // Breach detection runs only after the joint-state feed has been
+  // continuously fresh for startup_grace_sec, so bringup transients (EtherCAT
+  // reaching OP, controller activation) cannot latch a spurious e-stop.
+  double startup_grace_sec_{2.0};
+  bool detection_armed_{false};
+  bool warmup_started_{false};
+  rclcpp::Time warmup_start_;
+
   // --- ROS interfaces ---
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr effort_sub_;
