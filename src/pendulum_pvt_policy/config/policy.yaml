@@ -25,7 +25,8 @@ pendulum_pvt_policy:
     # Initial target + fall safety
     target_pos: 0.0
     default_pos: 0.0
-    fall_vel_limit: 20.0
+    # overspeed limit is now safety.velocity_limit in
+    # pendulum_safety/config/safety_limits.yaml
     fall_pos_limit: 10.0
     joint_state_timeout_sec: 0.05
     policy_enabled: true

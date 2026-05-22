@@ -19,6 +19,7 @@ find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
+find_package(pendulum_safety REQUIRED)
 
 set(DEPS
   controller_interface
@@ -29,6 +30,7 @@ set(DEPS
   realtime_tools
   std_srvs
   trajectory_msgs
+  pendulum_safety
 )
 
 add_library(${PROJECT_NAME} SHARED

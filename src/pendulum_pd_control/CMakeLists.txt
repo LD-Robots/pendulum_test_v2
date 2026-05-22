@@ -22,6 +22,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
+find_package(pendulum_safety REQUIRED)
 
 set(DEPS
   controller_interface
@@ -35,6 +36,7 @@ set(DEPS
   std_msgs
   std_srvs
   trajectory_msgs
+  pendulum_safety
 )
 
 add_library(${PROJECT_NAME} SHARED

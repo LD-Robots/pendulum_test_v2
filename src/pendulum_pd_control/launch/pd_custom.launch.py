@@ -33,6 +33,10 @@ def generate_launch_description():
     filtered_jsb_yaml = os.path.join(pkg_share, 'config', 'filtered_joint_state_broadcaster.yaml')
     slave_yaml        = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive.yaml')
 
+    safety_share  = get_package_share_directory('pendulum_safety')
+    safety_yaml   = os.path.join(safety_share, 'config', 'safety_limits.yaml')
+    safety_launch = os.path.join(safety_share, 'launch', 'safety.launch.py')
+
     use_sim = LaunchConfiguration('use_sim')
 
     real_xacro = os.path.join(desc_share, 'urdf', 'pendulum_ethercat.urdf.xacro')
@@ -93,7 +97,9 @@ def generate_launch_description():
     )
     pd_spawner = Node(
         package='controller_manager', executable='spawner',
-        arguments=['pendulum_pd_controller', '--param-file', pd_gains_yaml],
+        arguments=['pendulum_pd_controller',
+                   '--param-file', pd_gains_yaml,
+                   '--param-file', safety_yaml],
         output='screen',
     )
     # Drive telemetry broadcaster — real hardware only (sim has no temp/voltage
@@ -125,6 +131,13 @@ def generate_launch_description():
         OnProcessExit(target_action=jsb_spawner, on_exit=[filtered_jsb_spawner])
     )
 
+    # Safety supervisor — monitors joint state + drive telemetry and drives a
+    # configurable, manually-reset e-stop. Runs in both real and sim.
+    safety_stack = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(safety_launch),
+        launch_arguments={'use_sim': use_sim}.items(),
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('use_sim', default_value='false'),
         GroupAction([rsp_real, ros2_control_node]),
@@ -133,4 +146,5 @@ def generate_launch_description():
         pd_after_jsb,
         drive_status_after_jsb,
         filtered_jsb_after_jsb,
+        safety_stack,
     ])

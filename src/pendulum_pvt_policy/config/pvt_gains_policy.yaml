@@ -19,7 +19,7 @@ pendulum_pvt_controller:
 
     Kp:        200.0           # match training (models/pvt_v1) — streamed to PVT_KP
     Kd:        12.0            # match training                 — streamed to PVT_KD
-    tau_limit: 20.0            # host feed-forward clamp (Nm) — unused (ff off)
+    # effort / position / velocity caps: pendulum_safety/config/safety_limits.yaml
 
     # Feed-forward DISABLED — the RL policy already accounts for gravity /
     # inertia in its action output. Host FF on top would double-compensate.

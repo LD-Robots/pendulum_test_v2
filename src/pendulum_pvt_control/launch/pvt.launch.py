@@ -43,6 +43,10 @@ def generate_launch_description():
     slave_yaml        = os.path.join(pkg_share, 'config', 'ethercat', 'icube_x6_drive_pvt.yaml')
     drive_status_yaml = os.path.join(pkg_share, 'config', 'drive_status_broadcaster.yaml')
 
+    safety_share  = get_package_share_directory('pendulum_safety')
+    safety_yaml   = os.path.join(safety_share, 'config', 'safety_limits.yaml')
+    safety_launch = os.path.join(safety_share, 'launch', 'safety.launch.py')
+
     use_sim = LaunchConfiguration('use_sim')
 
     real_xacro = os.path.join(desc_share, 'urdf', 'pendulum_ethercat.urdf.xacro')
@@ -104,7 +108,9 @@ def generate_launch_description():
     pvt_spawner_real = Node(
         package='controller_manager', executable='spawner',
         condition=UnlessCondition(use_sim),
-        arguments=['pendulum_pvt_controller', '--param-file', gains_yaml],
+        arguments=['pendulum_pvt_controller',
+                   '--param-file', gains_yaml,
+                   '--param-file', safety_yaml],
         output='screen',
     )
     # Sim: the second --param-file overrides drive_side_pd to false — the
@@ -114,7 +120,8 @@ def generate_launch_description():
         condition=IfCondition(use_sim),
         arguments=['pendulum_pvt_controller',
                    '--param-file', gains_yaml,
-                   '--param-file', gains_sim_yaml],
+                   '--param-file', gains_sim_yaml,
+                   '--param-file', safety_yaml],
         output='screen',
     )
 
@@ -138,6 +145,13 @@ def generate_launch_description():
         OnProcessExit(target_action=jsb_spawner, on_exit=[drive_status_spawner])
     )
 
+    # Safety supervisor — monitors joint state + drive telemetry and drives a
+    # configurable, manually-reset e-stop. Runs in both real and sim.
+    safety_stack = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(safety_launch),
+        launch_arguments={'use_sim': use_sim}.items(),
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('use_sim', default_value='false'),
         GroupAction([rsp_real, ros2_control_node]),
@@ -146,4 +160,5 @@ def generate_launch_description():
         pvt_real_after_jsb,
         pvt_sim_after_jsb,
         drive_status_after_jsb,
+        safety_stack,
     ])

@@ -6,6 +6,11 @@
 #include <string>
 
 #include "controller_interface/controller_interface.hpp"
+#include "pendulum_safety/clamp.hpp"
+#include "pendulum_safety/estop_subscriber.hpp"
+#include "pendulum_safety/param_loader.hpp"
+#include "pendulum_safety/rate_limiter.hpp"
+#include "pendulum_safety/safety_limits.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "realtime_tools/realtime_buffer.hpp"
@@ -54,7 +59,6 @@ private:
     std::string joint;
     double Kp{0.0};
     double Kd{0.0};
-    double tau_limit{0.0};
     double mgl{0.0};
     double J{0.0};
     double Fv{0.0};
@@ -85,6 +89,15 @@ private:
   // Cached from params_ in on_configure — command_interface_configuration() runs
   // before activation and must agree with the index order used in update().
   bool drive_side_pd_{true};
+
+  // Centralised safety: limits loaded once in on_configure; the supervisor's
+  // e-stop / Kp-derate signal read every update(); the rate limiter bounds the
+  // commanded position slew + acceleration.
+  pendulum_safety::SafetyLimits limits_;
+  pendulum_safety::EstopSubscriber safety_;
+  pendulum_safety::RateLimiter rate_limiter_;
+  double estop_hold_pos_{0.0};   // joint position snapshotted when e-stop fires
+  bool estop_was_active_{false};
 
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr hold_srv_;

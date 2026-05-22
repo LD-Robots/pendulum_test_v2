@@ -12,9 +12,15 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <std_msgs/msg/int8.hpp>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
 
 #include <onnxruntime_cxx_api.h>
+
+#include "pendulum_safety/clamp.hpp"
+#include "pendulum_safety/param_loader.hpp"
+#include "pendulum_safety/rate_limiter.hpp"
+#include "pendulum_safety/safety_limits.hpp"
 
 namespace pendulum_pvt_policy
 {
@@ -79,17 +85,19 @@ private:
   double joint_state_timeout_sec_{0.05};
   double output_dt_{1.0 / 200.0};
 
-  // --- Slew rate limiter ---
+  // --- Slew / acceleration limiter (shared pendulum_safety RateLimiter) ---
   std::atomic<double> target_pd_slew_rate_{5.5};
   std::atomic<double> target_pd_goal_{0.0};
   std::atomic<bool> have_target_pd_goal_{false};
-  double last_published_target_pd_{std::numeric_limits<double>::quiet_NaN()};
+  pendulum_safety::RateLimiter rate_limiter_;
+
+  // --- Centralised safety limits (overspeed limit, accel cap, pos clamp) ---
+  pendulum_safety::SafetyLimits limits_;
 
   // --- Fall safety ---
   std::atomic<bool> policy_enabled_{true};
   std::atomic<double> default_pos_{0.0};
-  double fall_vel_limit_{20.0};
-  double fall_pos_limit_{10.0};
+  double fall_pos_limit_{10.0};   // drift-from-default tolerance — policy-local
   std::atomic<bool> fall_latched_{false};
 
   // --- Target ---
@@ -117,6 +125,7 @@ private:
   // --- ROS I/O ---
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr js_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr target_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int8>::SharedPtr estop_sub_;
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr target_pd_debug_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr fall_pub_;

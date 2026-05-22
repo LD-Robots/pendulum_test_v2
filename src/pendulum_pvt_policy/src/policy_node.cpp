@@ -33,8 +33,11 @@ PvtPolicyNode::PvtPolicyNode(const rclcpp::NodeOptions & options)
   default_pos_.store(declare_parameter<double>("default_pos", 0.0));
 
   // --- Fall safety ---
-  fall_vel_limit_ = declare_parameter<double>("fall_vel_limit", 20.0);
+  // The overspeed limit now comes from the shared pendulum_safety limits;
+  // fall_pos_limit stays policy-local — it is a drift-from-default tolerance,
+  // not an absolute joint bound.
   fall_pos_limit_ = declare_parameter<double>("fall_pos_limit", 10.0);
+  limits_ = pendulum_safety::loadSafetyLimits(*this, "safety.");
 
   // --- Topics ---
   joint_state_timeout_sec_ =
@@ -77,6 +80,20 @@ PvtPolicyNode::PvtPolicyNode(const rclcpp::NodeOptions & options)
   target_sub_ = create_subscription<std_msgs::msg::Float64>(
     target_topic, 10,
     std::bind(&PvtPolicyNode::onTarget, this, std::placeholders::_1));
+
+  // Safety supervisor e-stop — any non-zero estop_state latches the policy's
+  // fall-hold, so the node freezes its setpoint exactly as on a fall.
+  estop_sub_ = create_subscription<std_msgs::msg::Int8>(
+    "/pendulum/safety/estop_state", rclcpp::QoS(1).transient_local(),
+    [this](std_msgs::msg::Int8::SharedPtr msg) {
+      if (msg->data != 0 && !fall_latched_.exchange(true)) {
+        std_msgs::msg::Bool latched;
+        latched.data = true;
+        fall_pub_->publish(latched);
+        RCLCPP_ERROR(get_logger(),
+          "Safety supervisor e-stop — latching policy hold.");
+      }
+    });
 
   param_cb_ = add_on_set_parameters_callback(
     std::bind(&PvtPolicyNode::onParamChange, this, std::placeholders::_1));
@@ -207,7 +224,7 @@ void PvtPolicyNode::onInferenceTick()
 
   // --- Fall safety ---
   if (!fall_latched_.load()) {
-    const bool overspeed = std::abs(vel) > fall_vel_limit_;
+    const bool overspeed = std::abs(vel) > limits_.velocity_limit;
     const bool offpos = std::abs(pos - default_pos_.load()) > fall_pos_limit_;
     if (overspeed || offpos) {
       fall_latched_.store(true);
@@ -263,16 +280,11 @@ void PvtPolicyNode::onOutputTick()
 
   const double goal = target_pd_goal_.load();
 
-  double target_pd;
-  const double slew_rate = target_pd_slew_rate_.load();
-  if (std::isnan(last_published_target_pd_) || slew_rate <= 0.0) {
-    target_pd = goal;
-  } else {
-    const double max_step = slew_rate * output_dt_;
-    const double delta = goal - last_published_target_pd_;
-    target_pd = last_published_target_pd_ + std::clamp(delta, -max_step, max_step);
-  }
-  last_published_target_pd_ = target_pd;
+  // Slew- and acceleration-limit the published setpoint, then clamp it to the
+  // software position limits. The RateLimiter seeds itself on the first call.
+  double target_pd = rate_limiter_.limit(
+    goal, output_dt_, target_pd_slew_rate_.load(), limits_.acceleration_limit);
+  target_pd = pendulum_safety::clampPosition(target_pd, limits_);
   policy_target_.store(target_pd);
 
   publishSetpoint(target_pd);

@@ -4,7 +4,8 @@
 #
 # In drive_side_pd:true the drive runs tau = Kp*(q_d - q) + Kd*(qd_d - qd) +
 # tau_ff internally; the host only streams the payload. Note:
-#   - `tau_limit` clamps the host feed-forward ONLY. The hard torque ceiling is
+#   - the host feed-forward torque cap is `safety.effort_limit` in
+#     pendulum_safety/config/safety_limits.yaml. The hard torque ceiling is
 #     the 0x6072 max_torque SDO in config/ethercat/icube_x6_drive_pvt.yaml.
 #   - `comp_sign` only negates the host feed-forward. A flipped motor mounting
 #     must be corrected with negative EtherCAT factors, not comp_sign — keep it
@@ -17,7 +18,7 @@ pendulum_pvt_controller:
 
     Kp:        22.95           # stiffness  (Nm/rad)   — streamed to PVT_KP
     Kd:        2.14            # damping    (Nm·s/rad) — streamed to PVT_KD
-    tau_limit: 20.0            # clamp on the host feed-forward (Nm)
+    # effort / position / velocity caps: pendulum_safety/config/safety_limits.yaml
 
     mgl:       4.10            # gravity torque amplitude — placeholder, rig-specific
     J:         0.102           # rotating inertia (kg·m²)

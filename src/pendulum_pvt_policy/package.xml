@@ -13,6 +13,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>trajectory_msgs</depend>
+  <depend>pendulum_safety</depend>
 
   <!-- policy.launch.py includes pendulum_pvt_control/pvt.launch.py -->
   <exec_depend>pendulum_pvt_control</exec_depend>

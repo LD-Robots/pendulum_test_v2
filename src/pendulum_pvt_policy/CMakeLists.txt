@@ -13,6 +13,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(trajectory_msgs REQUIRED)
+find_package(pendulum_safety REQUIRED)
 
 # ONNX Runtime — prebuilt, fetched by scripts/init_onnxruntime.sh into
 # <workspace>/third_party/onnxruntime. The package lives at src/<pkg>, so
@@ -43,6 +44,7 @@ ament_target_dependencies(${PROJECT_NAME}
   sensor_msgs
   std_msgs
   trajectory_msgs
+  pendulum_safety
 )
 
 # RPATH so the executable finds libonnxruntime.so in the source-tree

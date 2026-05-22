@@ -40,6 +40,11 @@ def generate_launch_description():
     # gains are a property of the trained model, not of the controller.
     policy_gains = os.path.join(policy_share, 'config', 'pvt_gains_policy.yaml')
     pvt_launch = os.path.join(pvt_control_share, 'launch', 'pvt.launch.py')
+    # Shared safety limits — the supervisor itself comes up via pvt.launch.py
+    # (included below); the policy node only needs the safety.* limit values.
+    safety_yaml = os.path.join(
+        get_package_share_directory('pendulum_safety'),
+        'config', 'safety_limits.yaml')
 
     # --- ONNX Runtime shared lib path (safety net for the RPATH) ---
     _ws_candidates = [
@@ -99,6 +104,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             params_file,
+            safety_yaml,
             {
                 'onnx_path': LaunchConfiguration('onnx_path'),
                 'target_pos': LaunchConfiguration('target_pos'),

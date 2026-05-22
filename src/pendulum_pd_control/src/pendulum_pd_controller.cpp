@@ -12,14 +12,6 @@ namespace pendulum_pd_control
 namespace
 {
 constexpr double kInitialValue = std::numeric_limits<double>::quiet_NaN();
-
-double clamp_symmetric(double v, double limit)
-{
-  if (limit <= 0.0) {
-    return v;
-  }
-  return std::clamp(v, -limit, limit);
-}
 }  // namespace
 
 controller_interface::CallbackReturn PendulumPDController::on_init()
@@ -28,7 +20,6 @@ controller_interface::CallbackReturn PendulumPDController::on_init()
     auto_declare<std::string>("joint", "");
     auto_declare<double>("Kp", 0.0);
     auto_declare<double>("Kd", 0.0);
-    auto_declare<double>("tau_limit", 0.0);
     auto_declare<double>("mgl", 0.0);
     auto_declare<double>("J", 0.0);
     auto_declare<double>("Fv", 0.0);
@@ -50,7 +41,6 @@ void PendulumPDController::load_params()
   params_.joint         = node->get_parameter("joint").as_string();
   params_.Kp            = node->get_parameter("Kp").as_double();
   params_.Kd            = node->get_parameter("Kd").as_double();
-  params_.tau_limit     = node->get_parameter("tau_limit").as_double();
   params_.mgl           = node->get_parameter("mgl").as_double();
   params_.J             = node->get_parameter("J").as_double();
   params_.Fv            = node->get_parameter("Fv").as_double();
@@ -72,6 +62,11 @@ controller_interface::CallbackReturn PendulumPDController::on_configure(
   }
 
   setpoint_buf_.writeFromNonRT(Setpoint{params_.hold_position, 0.0, 0.0});
+
+  // Centralised safety: load the shared limits and subscribe to the
+  // supervisor's e-stop / Kp-derate signal.
+  limits_ = pendulum_safety::loadSafetyLimits(*get_node(), "safety.");
+  safety_.subscribe(get_node());
 
   auto node = get_node();
   setpoint_sub_ = node->create_subscription<trajectory_msgs::msg::JointTrajectoryPoint>(
@@ -135,6 +130,7 @@ controller_interface::return_type PendulumPDController::update(
   // or sweep Kp via `ros2 param set` without re-spawning the controller.
   load_params();
 
+  const pendulum_safety::SafetySignal safety = safety_.get();
   const auto mode = mode_.load();
   const Setpoint sp = *setpoint_buf_.readFromRT();
 
@@ -146,16 +142,43 @@ controller_interface::return_type PendulumPDController::update(
   const double q  = pos_opt.value();
   const double qd = vel_opt.value();
 
+  // Snapshot the joint position the first cycle an e-stop becomes active — a
+  // HOLD action regulates the joint back to this point.
+  if (safety.estop_active && !estop_was_active_) {
+    estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+  }
+  estop_was_active_ = safety.estop_active;
+
+  // Thermal Kp derating from the supervisor (1.0 when no supervisor / cool).
+  const double kp_eff = params_.Kp * safety.kp_scale;
+
   double tau = 0.0;
-  if (mode != Mode::FREE) {
+  if (safety.estop_active &&
+    safety.action == pendulum_safety::EstopAction::FREE)
+  {
+    // E-stop FREE — zero effort, the joint coasts.
+    tau = 0.0;
+  } else if (safety.estop_active) {
+    // E-stop HOLD — actively regulate to estop_hold_pos_, overriding the
+    // controller mode (safety must hold the joint regardless of FREE/TUNE/PD).
+    const double tau_g = params_.ff_gravity ? params_.mgl * std::sin(q) : 0.0;
+    const double tau_v = params_.ff_viscous ? params_.Fv * qd : 0.0;
+    const double tau_pd =
+      kp_eff * (estop_hold_pos_ - q) + params_.Kd * (0.0 - qd);
+    tau = params_.comp_sign * (tau_g + tau_v) + tau_pd;
+    tau = pendulum_safety::clampEffort(tau, limits_);
+  } else if (mode != Mode::FREE) {
+    // Normal operation — TUNE is feedforward only, PD adds the PD term.
+    const double ref_pos = pendulum_safety::clampPosition(sp.position, limits_);
+    const double ref_vel = pendulum_safety::clampVelocity(sp.velocity, limits_);
     const double tau_g = params_.ff_gravity ? params_.mgl * std::sin(q) : 0.0;
     const double tau_J = params_.ff_inertia ? params_.J * sp.acceleration : 0.0;
     const double tau_v = params_.ff_viscous ? params_.Fv * qd : 0.0;
     const double tau_pd = (mode == Mode::PD)
-      ? params_.Kp * (sp.position - q) + params_.Kd * (sp.velocity - qd)
+      ? kp_eff * (ref_pos - q) + params_.Kd * (ref_vel - qd)
       : 0.0;
     tau = params_.comp_sign * (tau_g + tau_J + tau_v) + tau_pd;
-    tau = clamp_symmetric(tau, params_.tau_limit);
+    tau = pendulum_safety::clampEffort(tau, limits_);
   }
 
   (void)command_interfaces_[0].set_value(tau);

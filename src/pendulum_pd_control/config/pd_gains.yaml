@@ -12,7 +12,7 @@ pendulum_pd_controller:
 
     Kp:        22.95
     Kd:        2.14
-    tau_limit: 20.0
+    # effort / position / velocity caps: pendulum_safety/config/safety_limits.yaml
 
     mgl:       4.10
     J:         0.102

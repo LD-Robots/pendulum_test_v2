@@ -1,9 +1,11 @@
 #ifndef PENDULUM_SAFETY__ESTOP_SUBSCRIBER_HPP_
 #define PENDULUM_SAFETY__ESTOP_SUBSCRIBER_HPP_
 
+#include <atomic>
+#include <cstdint>
+
 #include "pendulum_safety/safety_limits.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "realtime_tools/realtime_buffer.h"
 #include "std_msgs/msg/float64.hpp"
 #include "std_msgs/msg/int8.hpp"
 
@@ -18,53 +20,52 @@ struct SafetySignal
   double      kp_scale     = 1.0;
 };
 
-/// Consumer-side helper shared by the PD, PVT and policy control paths. Owns
-/// the two latched subscriptions the supervisor publishes and funnels them
-/// into a realtime buffer so update() can read the current SafetySignal
-/// lock-free. Topics:
+/// Consumer-side helper shared by the PD and PVT control paths. Owns the two
+/// latched subscriptions the supervisor publishes and stores their values in
+/// lock-free atomics so update() can read the current SafetySignal with no
+/// allocation and no locking. Topics:
 ///   /pendulum/safety/estop_state  (std_msgs/Int8:    0 clear, 1 FREE, 2 HOLD)
 ///   /pendulum/safety/kp_scale     (std_msgs/Float64: thermal Kp multiplier)
 ///
-/// Both subscription callbacks run on the consumer node's executor thread, so
-/// the read-modify-write into the buffer is serialised.
+/// When no supervisor is running the topics have no publisher; the atomics
+/// keep their safe defaults (no e-stop, kp_scale 1.0), so a control path
+/// behaves exactly as it did before the safety package existed.
 class EstopSubscriber
 {
 public:
   EstopSubscriber() = default;
 
-  /// Create the subscriptions on `node`. Safe to call from on_configure() /
-  /// the node constructor. NodeT is any handle exposing create_subscription
-  /// (rclcpp::Node or a ros2_control controller's lifecycle node handle).
+  /// Create the subscriptions on `node`. Safe to call from on_configure().
+  /// NodeT is any handle exposing create_subscription — a controller's
+  /// get_node() lifecycle handle or a plain rclcpp::Node.
   template<typename NodeT>
   void subscribe(NodeT node)
   {
-    buffer_.writeFromNonRT(SafetySignal{});
-
     const auto latched = rclcpp::QoS(1).transient_local();
 
     estop_sub_ = node->template create_subscription<std_msgs::msg::Int8>(
       "/pendulum/safety/estop_state", latched,
-      [this](std_msgs::msg::Int8::SharedPtr msg) {
-        SafetySignal sig = *buffer_.readFromNonRT();
-        sig.estop_active = msg->data != 0;
-        sig.action = (msg->data == 2) ? EstopAction::HOLD : EstopAction::FREE;
-        buffer_.writeFromNonRT(sig);
-      });
+      [this](std_msgs::msg::Int8::SharedPtr msg) {estop_state_.store(msg->data);});
 
     kp_scale_sub_ = node->template create_subscription<std_msgs::msg::Float64>(
       "/pendulum/safety/kp_scale", latched,
-      [this](std_msgs::msg::Float64::SharedPtr msg) {
-        SafetySignal sig = *buffer_.readFromNonRT();
-        sig.kp_scale = msg->data;
-        buffer_.writeFromNonRT(sig);
-      });
+      [this](std_msgs::msg::Float64::SharedPtr msg) {kp_scale_.store(msg->data);});
   }
 
   /// Current safety signal — realtime-safe, call from update().
-  SafetySignal get() { return *buffer_.readFromRT(); }
+  SafetySignal get() const
+  {
+    SafetySignal signal;
+    const int8_t state = estop_state_.load();
+    signal.estop_active = (state != 0);
+    signal.action = (state == 2) ? EstopAction::HOLD : EstopAction::FREE;
+    signal.kp_scale = kp_scale_.load();
+    return signal;
+  }
 
 private:
-  realtime_tools::RealtimeBuffer<SafetySignal> buffer_;
+  std::atomic<int8_t> estop_state_{0};
+  std::atomic<double> kp_scale_{1.0};
   rclcpp::Subscription<std_msgs::msg::Int8>::SharedPtr estop_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr kp_scale_sub_;
 };

@@ -25,6 +25,7 @@
   <depend>realtime_tools</depend>
   <depend>std_srvs</depend>
   <depend>trajectory_msgs</depend>
+  <depend>pendulum_safety</depend>
 
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>controller_manager</exec_depend>
