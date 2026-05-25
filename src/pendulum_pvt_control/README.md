@@ -111,7 +111,60 @@ publish is held until the next one arrives.
 Omitting a field is allowed: empty `positions` falls back to `hold_position`;
 empty `velocities` / `accelerations` default to `0.0`.
 
+### Send a trajectory via action — `FollowJointTrajectory`
+
+The controller exposes a `control_msgs/action/FollowJointTrajectory` server at
+`/pendulum_pvt_controller/follow_joint_trajectory`. The trajectory is sampled
+*inside* the 1 kHz `update()` loop with cubic-Hermite per segment (quintic-
+Hermite when both endpoints of a segment carry `accelerations`). A single-point
+goal is automatically prepended with an implicit start knot at the current
+measured position, so a one-shot goal becomes a smooth move from wherever the
+joint is — no need to set point A yourself.
+
+```bash
+# Move to 1.0 rad over 2 s, starting from the current position.
+ros2 action send_goal -f /pendulum_pvt_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  '{ trajectory: { joint_names: ["pendulum_joint"],
+       points: [ { positions: [1.0], time_from_start: { sec: 2 } } ] } }'
+
+# Multi-knot trajectory with explicit velocities (cubic-Hermite per segment).
+ros2 action send_goal -f /pendulum_pvt_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  '{ trajectory: { joint_names: ["pendulum_joint"],
+       points: [
+         { positions: [0.5], velocities: [1.0], time_from_start: { sec: 1 } },
+         { positions: [1.5], velocities: [0.0], time_from_start: { sec: 3 } }
+       ] } }'
+```
+
+The same closed-loop **lag governor** that `pvt_goto.py` implements is ported
+into the in-RT sampler: if the joint lags behind the reference (e.g. someone
+grabs it), the virtual trajectory clock is smoothly time-scaled down; on
+release it ramps back up and the trajectory continues from where it paused —
+no position jump, no velocity spike. Tuning is via three controller params:
+
+| Param | Meaning | Default |
+|-------|---------|---------|
+| `lag_free` | lead (rad) below which the trajectory clock runs full speed | `0.04` |
+| `lag_pause` | lead (rad) at which the clock is fully paused | `0.14` |
+| `alpha_slew` | max rate of change of the time-scale factor (1/s); smaller = gentler resume | `2.0` |
+
+**Pre-emption semantics**: publishing to `~/setpoint`, calling `~/hold`, or
+calling `~/free` aborts any in-flight action goal (last-writer-wins). Sending
+a new action goal while another is running aborts the previous one. An e-stop
+also aborts the goal — on reset the controller waits for a fresh setpoint or
+goal as today, no auto-resume.
+
+When the goal completes the controller holds the final commanded position via
+the same `~/setpoint` buffer, so no further publishing is required.
+
 ### Smooth point-to-point moves — `pvt_goto`
+
+> **Note**: `pvt_goto.py` predates the action server above and now duplicates
+> its behavior (same quintic-style shape, same lag governor). It is retained
+> as a quick CLI for users who don't want to send actions; the action server is
+> the recommended interface for scripted / automated callers.
 
 For an actual move from A to B over a time `T`, stream a smooth profile rather
 than stepping. `pvt_goto.py` generates a **quintic** trajectory (zero velocity
@@ -212,6 +265,7 @@ ros2 param set /pendulum_pvt_controller ff_gravity false
 | `comp_sign` | ±1 motor-mounting flip applied to feedforward (sim-only — see Caveats) | `1.0` |
 | `ff_gravity` / `ff_inertia` / `ff_viscous` | feedforward term toggles | `true`/`true`/`false` |
 | `hold_position` | default setpoint before any command arrives | `0.0` |
+| `lag_free` / `lag_pause` / `alpha_slew` | action-server lag governor (see [Send a trajectory via action](#send-a-trajectory-via-action--followjointtrajectory)) | `0.04` / `0.14` / `2.0` |
 
 Changing `drive_side_pd` at runtime has no effect — the claimed command-interface
 set is fixed when the controller is configured. Re-spawn to switch.

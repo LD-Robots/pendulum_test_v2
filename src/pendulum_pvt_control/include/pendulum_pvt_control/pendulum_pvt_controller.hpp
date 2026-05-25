@@ -1,10 +1,13 @@
 #ifndef PENDULUM_PVT_CONTROL__PENDULUM_PVT_CONTROLLER_HPP_
 #define PENDULUM_PVT_CONTROL__PENDULUM_PVT_CONTROLLER_HPP_
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "control_msgs/action/follow_joint_trajectory.hpp"
 #include "controller_interface/controller_interface.hpp"
 #include "pendulum_safety/clamp.hpp"
 #include "pendulum_safety/estop_subscriber.hpp"
@@ -12,6 +15,7 @@
 #include "pendulum_safety/rate_limiter.hpp"
 #include "pendulum_safety/safety_limits.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "realtime_tools/realtime_buffer.hpp"
 #include "std_srvs/srv/trigger.hpp"
@@ -30,6 +34,9 @@ class PendulumPVTController : public controller_interface::ControllerInterface
 {
 public:
   PendulumPVTController() = default;
+
+  using FJT = control_msgs::action::FollowJointTrajectory;
+  using GoalHandleFJT = rclcpp_action::ServerGoalHandle<FJT>;
 
   controller_interface::InterfaceConfiguration command_interface_configuration() const override;
   controller_interface::InterfaceConfiguration state_interface_configuration() const override;
@@ -53,6 +60,25 @@ private:
     double acceleration = 0.0;
   };
 
+  // A single waypoint in an action-driven trajectory. `has_acc` selects the
+  // segment interpolant in sample_segment(): both endpoints with `has_acc=true`
+  // → quintic-Hermite (matches pos+vel+acc at both ends); otherwise → cubic-
+  // Hermite (matches pos+vel; vel defaults to 0 when the message omits it).
+  struct Knot
+  {
+    double t{0.0};        // seconds from trajectory start (knots[0].t == 0)
+    double pos{0.0};
+    double vel{0.0};
+    double acc{0.0};
+    bool   has_acc{false};
+  };
+
+  struct Trajectory
+  {
+    std::vector<Knot> knots;   // monotonically increasing t, size >= 2
+    double duration{0.0};      // == knots.back().t
+  };
+
   // Loaded once in on_configure, refreshed each update() from rclcpp params.
   struct Params
   {
@@ -70,6 +96,11 @@ private:
     // true  -> real hardware: stream pos/vel/effort/kp/kd, drive runs the PD law.
     // false -> Gazebo sim: claim only effort, run the PD law in software.
     bool drive_side_pd{true};
+    // Lag-governor (port of pvt_goto.py's --lag-free / --lag-pause / --alpha-slew).
+    // Active only when an action-driven trajectory is being sampled.
+    double lag_free{0.04};      // rad: below this lead the move runs full speed
+    double lag_pause{0.14};     // rad: at this lead the move is fully paused
+    double alpha_slew{2.0};     // 1/s: max rate of change of the time-scale
   };
 
   void load_params();
@@ -84,6 +115,31 @@ private:
   void free_service(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+
+  // Action server callbacks — all run on the executor thread (action callbacks
+  // are serialised by rclcpp_action, so active_goal_ needs no lock).
+  rclcpp_action::GoalResponse handle_goal(
+    const rclcpp_action::GoalUUID & uuid,
+    std::shared_ptr<const FJT::Goal> goal);
+  rclcpp_action::CancelResponse handle_cancel(
+    const std::shared_ptr<GoalHandleFJT> goal_handle);
+  void handle_accepted(const std::shared_ptr<GoalHandleFJT> goal_handle);
+  // 10 Hz timer body: publishes FJT feedback from the RT-published sampled state
+  // and finalises the goal on completion / cancel / pre-emption.
+  void on_feedback_tick();
+  // Write nullptr to traj_buf_ and abort active_goal_ if any. Called from
+  // setpoint_callback / hold_service / free_service / on_deactivate / e-stop
+  // falling edge. RT loop falls through to the legacy setpoint path next tick.
+  void preempt_goal(const std::string & why);
+
+  // Pure helpers — RT-safe. cubic-Hermite when either knot lacks acc; quintic-
+  // Hermite when both endpoints carry acc.
+  static void sample_segment(
+    const Knot & a, const Knot & b, double t,
+    double & p, double & v, double & a_out);
+  static void sample_trajectory(
+    const Trajectory & traj, double t,
+    double & p, double & v, double & a);
 
   Params params_;
   // Cached from params_ in on_configure — command_interface_configuration() runs
@@ -109,6 +165,33 @@ private:
 
   realtime_tools::RealtimeBuffer<Setpoint> setpoint_buf_;
   std::atomic<Mode> mode_{Mode::FREE};
+
+  // Action interface. Written by executor-thread callbacks, read by the RT
+  // loop via traj_buf_ (single-writer / single-reader RealtimeBuffer).
+  rclcpp_action::Server<FJT>::SharedPtr action_server_;
+  realtime_tools::RealtimeBuffer<std::shared_ptr<const Trajectory>> traj_buf_;
+  // Latched by the RT loop when tv_ reaches duration, or by preempt_goal /
+  // e-stop falling edge. The feedback timer turns it into a goal result.
+  std::atomic<bool> traj_done_{false};
+  // True when the RT loop latched traj_done_ from a clean completion (else the
+  // termination came from pre-emption / e-stop and the goal is aborted).
+  std::atomic<bool> traj_completed_clean_{false};
+
+  // Governor state — touched only by the RT loop; reset by handle_accepted
+  // *before* the trajectory shared_ptr is published, so the RT loop reads
+  // consistent state on the first tick of a new goal.
+  double tv_{0.0};
+  double alpha_{1.0};
+  double dq_sign_{1.0};
+
+  // RT-published snapshot for the 10 Hz feedback timer: {ref_pos, ref_vel,
+  // ref_acc, measured_q}. Written every tick while a trajectory is active.
+  realtime_tools::RealtimeBuffer<std::array<double, 4>> sampled_state_;
+
+  // Touched only on the executor thread (action callbacks + feedback timer
+  // are all on the controller_manager executor, serialised).
+  std::shared_ptr<GoalHandleFJT> active_goal_;
+  rclcpp::TimerBase::SharedPtr feedback_timer_;
 };
 
 }  // namespace pendulum_pvt_control
