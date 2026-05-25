@@ -30,9 +30,12 @@ public:
   /// Forget all state; the next limit() call re-seeds (use on (re)activation).
   void reset();
 
-  /// Explicitly seed the internal state to a known position (use when
-  /// entering a HOLD so the hold transition is itself rate-limited).
-  void seed(double position);
+  /// Explicitly seed the internal state to a known position and (optional)
+  /// command velocity. Seeding the velocity matters when entering a HOLD from
+  /// motion: the limiter then continues from the joint's actual speed and
+  /// decelerates smoothly, instead of starting from rest while the joint
+  /// overruns the command.
+  void seed(double position, double velocity = 0.0);
 
   /// True once the limiter has been seeded by a limit() or seed() call.
   bool seeded() const { return seeded_; }

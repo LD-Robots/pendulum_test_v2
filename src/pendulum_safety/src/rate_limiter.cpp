@@ -68,10 +68,10 @@ void RateLimiter::reset()
   prev_vel_ = 0.0;
 }
 
-void RateLimiter::seed(double position)
+void RateLimiter::seed(double position, double velocity)
 {
   prev_cmd_ = position;
-  prev_vel_ = 0.0;
+  prev_vel_ = velocity;
   seeded_ = true;
 }
 

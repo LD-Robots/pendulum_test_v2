@@ -201,10 +201,27 @@ controller_interface::return_type PendulumPVTController::update(
   const double q  = pos_opt.value();
   const double qd = vel_opt.value();
 
-  // Snapshot the joint position the first cycle an e-stop becomes active — a
-  // HOLD action regulates the joint back to this point.
+  // First cycle of an e-stop: pick the HOLD target. The joint may be moving
+  // fast (e.g. an overspeed trip), so a HOLD targets a *braking distance*
+  // ahead and seeds the rate limiter at the joint's actual (position,
+  // velocity) — the command then becomes a smooth deceleration ramp to rest.
+  // Pinning the instantaneous position would make the drive fight the joint's
+  // momentum and ring.
   if (safety.estop_active && !estop_was_active_) {
-    estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    if (safety.action == pendulum_safety::EstopAction::HOLD) {
+      const double accel = limits_.acceleration_limit > 0.0
+        ? limits_.acceleration_limit : 60.0;
+      double v0 = qd;
+      if (limits_.slew_rate_limit > 0.0) {
+        v0 = std::clamp(qd, -limits_.slew_rate_limit, limits_.slew_rate_limit);
+      }
+      const double brake = (v0 * v0) / (2.0 * accel);
+      estop_hold_pos_ = pendulum_safety::clampPosition(
+        q + std::copysign(brake, v0), limits_);
+      rate_limiter_.seed(q, v0);
+    } else {
+      estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    }
   }
   estop_was_active_ = safety.estop_active;
 

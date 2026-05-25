@@ -142,10 +142,21 @@ controller_interface::return_type PendulumPDController::update(
   const double q  = pos_opt.value();
   const double qd = vel_opt.value();
 
-  // Snapshot the joint position the first cycle an e-stop becomes active — a
-  // HOLD action regulates the joint back to this point.
+  // First cycle of an e-stop: pick the HOLD target. The joint may be moving
+  // fast (e.g. an overspeed trip), so a HOLD targets a *braking distance*
+  // ahead — regulating to a point in the direction of travel lets the joint
+  // decelerate into the hold instead of being yanked back against its
+  // momentum.
   if (safety.estop_active && !estop_was_active_) {
-    estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    if (safety.action == pendulum_safety::EstopAction::HOLD) {
+      const double accel = limits_.acceleration_limit > 0.0
+        ? limits_.acceleration_limit : 60.0;
+      const double brake = (qd * qd) / (2.0 * accel);
+      estop_hold_pos_ = pendulum_safety::clampPosition(
+        q + std::copysign(brake, qd), limits_);
+    } else {
+      estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    }
   }
   estop_was_active_ = safety.estop_active;
 
