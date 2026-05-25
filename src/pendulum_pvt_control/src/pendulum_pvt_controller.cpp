@@ -663,6 +663,8 @@ void PendulumPVTController::on_feedback_tick()
 void PendulumPVTController::publish_settled_setpoint(double position)
 {
   if (!setpoint_pub_) {
+    RCLCPP_WARN(get_node()->get_logger(),
+                "publish_settled_setpoint called but setpoint_pub_ is null");
     return;
   }
   trajectory_msgs::msg::JointTrajectoryPoint msg;
@@ -670,6 +672,8 @@ void PendulumPVTController::publish_settled_setpoint(double position)
   msg.velocities    = {0.0};
   msg.accelerations = {0.0};
   setpoint_pub_->publish(msg);
+  RCLCPP_INFO(get_node()->get_logger(),
+              "settled ~/setpoint published: position=%.4f", position);
 }
 
 void PendulumPVTController::on_active_setpoint_tick()
