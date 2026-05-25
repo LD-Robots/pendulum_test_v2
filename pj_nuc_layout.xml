@@ -4,75 +4,101 @@
   <Tab containers="1" tab_name="tab1">
    <Container>
     <DockSplitter orientation="-" count="1" sizes="1">
-     <DockSplitter orientation="|" count="2" sizes="0.500698;0.499302">
-      <DockSplitter orientation="-" count="3" sizes="0.333692;0.19591;0.470398">
-       <DockSplitter orientation="|" count="4" sizes="0.2507;0.2493;0.2507;0.2493">
+     <DockSplitter orientation="|" count="2" sizes="0.601956;0.398044">
+      <DockSplitter orientation="-" count="3" sizes="0.188375;0.201292;0.610334">
+       <DockSplitter orientation="|" count="4" sizes="0.250941;0.248432;0.250941;0.249686">
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="48.025000" left="244.446860" right="249.446658" bottom="46.975000"/>
+          <range top="48.025000" left="321.315922" right="326.301137" bottom="46.975000"/>
           <limitY/>
           <curve color="#ff7f0e" name="/drive_status_broadcaster/bus_voltage/data"/>
          </plot>
         </DockArea>
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="41.025000" left="244.446842" right="249.446649" bottom="39.975000"/>
+          <range top="57.100000" left="321.315940" right="326.301158" bottom="56.900000"/>
           <limitY/>
           <curve color="#f14cc1" name="/drive_status_broadcaster/drive_temperature/data"/>
          </plot>
         </DockArea>
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="27.100000" left="244.446819" right="249.446634" bottom="26.900000"/>
+          <range top="43.100000" left="321.315914" right="326.301149" bottom="42.900000"/>
           <limitY/>
           <curve color="#9467bd" name="/drive_status_broadcaster/motor_temperature/data"/>
          </plot>
         </DockArea>
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="0.100000" left="244.446871" right="249.446664" bottom="-0.100000"/>
+          <range top="0.100000" left="321.315930" right="326.301109" bottom="-0.100000"/>
           <limitY/>
           <curve color="#ff7f0e" name="/diagnostics/pendulum_joint/pendulum_drive: telemetry/error_code"/>
          </plot>
         </DockArea>
        </DockSplitter>
-       <DockSplitter orientation="|" count="2" sizes="0.5;0.5">
+       <DockSplitter orientation="|" count="2" sizes="0.500626;0.499374">
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="2.050000" left="0.000000" right="12.318325" bottom="-0.050000"/>
+          <range top="1.025000" left="0.000000" right="50.662463" bottom="-0.025000"/>
           <limitY/>
           <curve color="#17becf" name="/pendulum/safety/estop_state/data"/>
          </plot>
         </DockArea>
         <DockArea name="...">
          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="1.100000" left="244.490582" right="249.392385" bottom="0.900000"/>
+          <range top="1.100000" left="321.375128" right="326.275430" bottom="0.900000"/>
           <limitY/>
           <curve color="#bcbd22" name="/pendulum/safety/kp_scale/data"/>
          </plot>
         </DockArea>
        </DockSplitter>
-       <DockSplitter orientation="|" count="2" sizes="0.476257;0.523743">
-        <DockArea name="...">
-         <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-          <range top="3.071976" left="244.612533" right="246.418275" bottom="0.048976"/>
-          <limitY/>
-          <curve color="#1f77b4" name="/pendulum_pvt_controller/setpoint/positions[0]"/>
-         </plot>
-        </DockArea>
+       <DockSplitter orientation="|" count="2" sizes="0.478098;0.521902">
         <DockSplitter orientation="-" count="2" sizes="0.5;0.5">
          <DockArea name="...">
           <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-           <range top="2.701050" left="244.612533" right="246.418275" bottom="-0.065879"/>
+           <range top="2.267310" left="121.802015" right="175.902822" bottom="0.969090"/>
            <limitY/>
-           <curve color="#d62728" name="/pendulum_pvt_controller/setpoint/velocities[0]"/>
+           <curve color="#1f77b4" name="/pendulum_pvt_controller/setpoint/positions[0]"/>
+           <curve color="#9467bd" name="/pendulum_pvt_controller/active_setpoint/positions[0]"/>
           </plot>
          </DockArea>
          <DockArea name="...">
           <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-           <range top="16.675296" left="244.612533" right="246.418275" bottom="-7.928992"/>
+           <range top="1.100000" left="321.315947" right="326.314200" bottom="0.900000"/>
+           <limitY/>
+           <curve color="#9467bd" name="/pendulum_pvt_controller/active_setpoint/positions[0]"/>
+          </plot>
+         </DockArea>
+        </DockSplitter>
+        <DockSplitter orientation="-" count="4" sizes="0.25;0.25;0.25;0.25">
+         <DockArea name="...">
+          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
+           <range top="0.100000" left="121.802015" right="175.902822" bottom="-0.100000"/>
+           <limitY/>
+           <curve color="#d62728" name="/pendulum_pvt_controller/setpoint/velocities[0]"/>
+           <curve color="#17becf" name="/pendulum_pvt_controller/active_setpoint/velocities[0]"/>
+          </plot>
+         </DockArea>
+         <DockArea name="...">
+          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
+           <range top="0.100000" left="321.315947" right="326.314200" bottom="-0.100000"/>
+           <limitY/>
+           <curve color="#17becf" name="/pendulum_pvt_controller/active_setpoint/velocities[0]"/>
+          </plot>
+         </DockArea>
+         <DockArea name="...">
+          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
+           <range top="0.100000" left="121.802015" right="175.902822" bottom="-0.100000"/>
            <limitY/>
            <curve color="#1ac938" name="/pendulum_pvt_controller/setpoint/accelerations[0]"/>
+           <curve color="#f14cc1" name="/pendulum_pvt_controller/active_setpoint/accelerations[0]"/>
+          </plot>
+         </DockArea>
+         <DockArea name="...">
+          <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
+           <range top="0.100000" left="321.315947" right="326.314200" bottom="-0.100000"/>
+           <limitY/>
+           <curve color="#f14cc1" name="/pendulum_pvt_controller/active_setpoint/accelerations[0]"/>
           </plot>
          </DockArea>
         </DockSplitter>
@@ -81,21 +107,21 @@
       <DockSplitter orientation="-" count="3" sizes="0.333692;0.332616;0.333692">
        <DockArea name="...">
         <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-         <range top="3.052998" left="244.464468" right="249.462641" bottom="0.049439"/>
+         <range top="1.019112" left="321.315689" right="326.313924" bottom="1.018961"/>
          <limitY/>
          <curve color="#1f77b4" name="/joint_states/pendulum_joint/position"/>
         </plot>
        </DockArea>
        <DockArea name="...">
         <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-         <range top="6.164950" left="244.464468" right="249.462641" bottom="-0.536580"/>
+         <range top="3.023566" left="321.315689" right="326.313924" bottom="2.712524"/>
          <limitY/>
          <curve color="#d62728" name="/joint_states/pendulum_joint/effort"/>
         </plot>
        </DockArea>
        <DockArea name="...">
         <plot flip_x="false" line_width="1.0" mode="TimeSeries" flip_y="false">
-         <range top="2.564713" left="244.464468" right="249.462641" bottom="-0.065697"/>
+         <range top="0.001008" left="321.315689" right="326.313924" bottom="-0.001056"/>
          <limitY/>
          <curve color="#1ac938" name="/joint_states/pendulum_joint/velocity"/>
         </plot>
@@ -130,7 +156,7 @@
    <max_array_size value="100"/>
    <boolean_strings_to_number value="true"/>
    <remove_suffix_from_strings value="true"/>
-   <selected_topics value="/diagnostics;/drive_status_broadcaster/bus_voltage;/drive_status_broadcaster/drive_temperature;/drive_status_broadcaster/error_code;/drive_status_broadcaster/motor_temperature;/dynamic_joint_states;/joint_states;/pendulum/safety/breach_reason;/pendulum/safety/estop_state;/pendulum/safety/kp_scale;/pendulum_pvt_controller/setpoint;/pendulum_pvt_controller/transition_event"/>
+   <selected_topics value="/diagnostics;/drive_status_broadcaster/bus_voltage;/drive_status_broadcaster/drive_temperature;/drive_status_broadcaster/error_code;/drive_status_broadcaster/motor_temperature;/dynamic_joint_states;/joint_states;/pendulum/safety/breach_reason;/pendulum/safety/estop_state;/pendulum/safety/kp_scale;/pendulum_pvt_controller/setpoint;/pendulum_pvt_controller/transition_event;/pendulum_pvt_controller/active_setpoint"/>
   </plugin>
   <plugin ID="UDP Server"/>
   <plugin ID="WebSocket Server"/>

@@ -102,15 +102,22 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
   safety_.subscribe(get_node());
 
   auto node = get_node();
+  // Subscription ignores our own publications: while a goal is active the
+  // action server streams the interpolated (pos, vel, acc) on ~/setpoint to
+  // mirror pvt_goto.py's behavior, and without this flag each publication
+  // would re-trigger setpoint_callback → preempt_goal → goal aborts on the
+  // first tick.
+  rclcpp::SubscriptionOptions sub_opts;
+  sub_opts.ignore_local_publications = true;
   setpoint_sub_ = node->create_subscription<trajectory_msgs::msg::JointTrajectoryPoint>(
     "~/setpoint", rclcpp::SystemDefaultsQoS(),
-    std::bind(&PendulumPVTController::setpoint_callback, this, std::placeholders::_1));
-  // Publisher on the same topic. Only the action server publishes here, and
-  // only on goal settlement (see on_feedback_tick). The self-subscription will
-  // re-trigger setpoint_callback → preempt_goal (no-op, goal already done) →
-  // setpoint_buf_ write (redundant with the direct write we already do, but
-  // harmless). Net effect: external observers see one final point on ~/setpoint
-  // matching the controller's resting target.
+    std::bind(&PendulumPVTController::setpoint_callback, this, std::placeholders::_1),
+    sub_opts);
+  // Publisher on the same topic. Streamed at 200 Hz from on_active_setpoint_tick
+  // while a goal is active (matching pvt_goto.py's stream shape), plus a final
+  // settle frame from on_feedback_tick on goal end. External observers see the
+  // same data shape on ~/setpoint regardless of whether the source is the
+  // action server or an external publisher.
   setpoint_pub_ = node->create_publisher<trajectory_msgs::msg::JointTrajectoryPoint>(
     "~/setpoint", rclcpp::SystemDefaultsQoS());
 
@@ -663,8 +670,6 @@ void PendulumPVTController::on_feedback_tick()
 void PendulumPVTController::publish_settled_setpoint(double position)
 {
   if (!setpoint_pub_) {
-    RCLCPP_WARN(get_node()->get_logger(),
-                "publish_settled_setpoint called but setpoint_pub_ is null");
     return;
   }
   trajectory_msgs::msg::JointTrajectoryPoint msg;
@@ -672,8 +677,6 @@ void PendulumPVTController::publish_settled_setpoint(double position)
   msg.velocities    = {0.0};
   msg.accelerations = {0.0};
   setpoint_pub_->publish(msg);
-  RCLCPP_INFO(get_node()->get_logger(),
-              "settled ~/setpoint published: position=%.4f", position);
 }
 
 void PendulumPVTController::on_active_setpoint_tick()
@@ -686,7 +689,17 @@ void PendulumPVTController::on_active_setpoint_tick()
   msg.positions     = {sampled[0]};
   msg.velocities    = {sampled[1]};
   msg.accelerations = {sampled[2]};
+  // ~/active_setpoint is the always-on diagnostic — it reflects whatever the
+  // controller is currently tracking, including the legacy ~/setpoint path,
+  // e-stop holds and post-reset holds.
   active_setpoint_pub_->publish(msg);
+  // ~/setpoint mirrors pvt_goto.py's stream: only published while a goal is
+  // active, so external observers see the same data shape regardless of which
+  // tool drove the move. Goes silent once the goal settles, with one final
+  // (endpoint, 0, 0) frame from on_feedback_tick.
+  if (active_goal_ && setpoint_pub_) {
+    setpoint_pub_->publish(msg);
+  }
 }
 
 void PendulumPVTController::sample_trajectory(
