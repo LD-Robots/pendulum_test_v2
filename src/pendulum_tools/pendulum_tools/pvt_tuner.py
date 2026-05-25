@@ -124,6 +124,8 @@ class PvtTunerWindow(QMainWindow):
     _breach_sig = pyqtSignal(str)
     _service_result_sig = pyqtSignal(str, bool, str)  # label, ok, message
     _discovery_sig = pyqtSignal(list, object, int, str)  # pvt, broadcaster, count, source
+    _params_loaded_sig = pyqtSignal(str, object)  # ctrl, values dict
+    _apply_results_sig = pyqtSignal(object)  # list of (name, ok, msg)
 
     def __init__(self, node: Node):
         super().__init__()
@@ -163,6 +165,8 @@ class PvtTunerWindow(QMainWindow):
         self._breach_sig.connect(self._on_breach)
         self._service_result_sig.connect(self._on_service_result)
         self._discovery_sig.connect(self._on_discovery_result)
+        self._params_loaded_sig.connect(self._on_params_loaded)
+        self._apply_results_sig.connect(self._on_apply_results)
 
         # Subscriptions that don't depend on controller discovery
         self._setup_safety_subs()
@@ -557,27 +561,28 @@ class PvtTunerWindow(QMainWindow):
               file=sys.stderr, flush=True)
         values = self._rclpy_get_params(ctrl, names)
         print(f"[pvt_tuner] got: {values}", file=sys.stderr, flush=True)
+        self._params_loaded_sig.emit(ctrl, values)
+
+    def _on_params_loaded(self, ctrl: str, values: dict):
+        """pyqtSignal slot — runs on the GUI thread, safe to touch widgets."""
+        if self._current_ctrl != ctrl:
+            return
         kp = values.get("Kp")
         kd = values.get("Kd")
         mgl = values.get("mgl")
         ff_g = values.get("ff_gravity")
         joint = values.get("joint")
-
-        def apply():
-            if self._current_ctrl != ctrl:
-                return
-            if isinstance(kp, (int, float)) and not isinstance(kp, bool):
-                self._kp_spin.setValue(float(kp))
-            if isinstance(kd, (int, float)) and not isinstance(kd, bool):
-                self._kd_spin.setValue(float(kd))
-            if isinstance(mgl, (int, float)) and not isinstance(mgl, bool):
-                self._mgl_spin.setValue(float(mgl))
-            if isinstance(ff_g, bool):
-                self._ff_grav_check.setChecked(ff_g)
-            self._joint_name = joint if isinstance(joint, str) and joint else "—"
-            self._joint_label.setText(f"joint: {self._joint_name}")
-
-        QTimer.singleShot(0, apply)
+        if isinstance(kp, (int, float)) and not isinstance(kp, bool):
+            self._kp_spin.setValue(float(kp))
+        if isinstance(kd, (int, float)) and not isinstance(kd, bool):
+            self._kd_spin.setValue(float(kd))
+        if isinstance(mgl, (int, float)) and not isinstance(mgl, bool):
+            self._mgl_spin.setValue(float(mgl))
+        if isinstance(ff_g, bool):
+            self._ff_grav_check.setChecked(ff_g)
+        self._joint_name = joint if isinstance(joint, str) and joint else "—"
+        self._joint_label.setText(f"joint: {self._joint_name}")
+        self._read_btn.setEnabled(True)
 
     def _rclpy_get_params(self, ctrl: str, names: list[str], timeout: float = 5.0):
         """Read parameters from <ctrl> via rcl_interfaces/srv/GetParameters."""
@@ -672,12 +677,11 @@ class PvtTunerWindow(QMainWindow):
             self._gains_status.setStyleSheet(f"color: {C_YELLOW};")
             return
         self._read_btn.setEnabled(False)
-
-        def worker():
-            self._load_controller_params(ctrl)
-            QTimer.singleShot(0, lambda: self._read_btn.setEnabled(True))
-
-        threading.Thread(target=worker, daemon=True).start()
+        # _load_controller_params emits _params_loaded_sig; _on_params_loaded
+        # re-enables the Read button.
+        threading.Thread(
+            target=self._load_controller_params, args=(ctrl,), daemon=True
+        ).start()
 
     def _on_apply_gains(self):
         ctrl = self._current_ctrl
@@ -698,29 +702,26 @@ class PvtTunerWindow(QMainWindow):
             results = self._rclpy_set_params(ctrl, targets)
             print(f"[pvt_tuner] set results: {results}",
                   file=sys.stderr, flush=True)
-
-            # Re-read so the spinboxes reflect what the controller actually
-            # latched (clamped / rejected values).
+            self._apply_results_sig.emit(results)
+            # Re-read so spinboxes reflect what the controller actually latched.
             self._load_controller_params(ctrl)
 
-            def report():
-                self._apply_btn.setEnabled(True)
-                lines = []
-                all_ok = True
-                for name, ok, msg in results:
-                    if not ok:
-                        all_ok = False
-                        lines.append(f"{name} FAIL: {msg}")
-                    else:
-                        lines.append(name)
-                self._gains_status.setText("set: " + " | ".join(lines))
-                self._gains_status.setStyleSheet(
-                    f"color: {C_GREEN if all_ok else C_RED};"
-                )
-
-            QTimer.singleShot(0, report)
-
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_apply_results(self, results: list):
+        self._apply_btn.setEnabled(True)
+        lines = []
+        all_ok = True
+        for name, ok, msg in results:
+            if not ok:
+                all_ok = False
+                lines.append(f"{name} FAIL: {msg}")
+            else:
+                lines.append(name)
+        self._gains_status.setText("set: " + " | ".join(lines))
+        self._gains_status.setStyleSheet(
+            f"color: {C_GREEN if all_ok else C_RED};"
+        )
 
     # ─── SERVICE CALLS ──────────────────────────────────────
 

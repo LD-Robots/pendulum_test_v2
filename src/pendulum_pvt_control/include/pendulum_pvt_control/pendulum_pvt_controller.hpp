@@ -131,6 +131,10 @@ private:
   // setpoint_callback / hold_service / free_service / on_deactivate / e-stop
   // falling edge. RT loop falls through to the legacy setpoint path next tick.
   void preempt_goal(const std::string & why);
+  // Publish a one-shot ~/setpoint with (position, 0, 0). Called from
+  // on_feedback_tick on goal settlement; gives external observers a static
+  // view of the resting target.
+  void publish_settled_setpoint(double position);
 
   // Pure helpers — RT-safe. cubic-Hermite when either knot lacks acc; quintic-
   // Hermite when both endpoints carry acc.
@@ -160,6 +164,11 @@ private:
   std::atomic<bool> waiting_for_setpoint_{false};
 
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_sub_;
+  // Same topic the controller subscribes to. The action server publishes the
+  // final endpoint here when a goal settles (success / cancel / abort), so
+  // external observers see a one-shot "resting target" on ~/setpoint while
+  // the realtime interpolator output stays on ~/active_setpoint.
+  rclcpp::Publisher<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_pub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr hold_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr free_srv_;
 

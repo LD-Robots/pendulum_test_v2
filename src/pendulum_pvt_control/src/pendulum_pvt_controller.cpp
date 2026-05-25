@@ -105,6 +105,14 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
   setpoint_sub_ = node->create_subscription<trajectory_msgs::msg::JointTrajectoryPoint>(
     "~/setpoint", rclcpp::SystemDefaultsQoS(),
     std::bind(&PendulumPVTController::setpoint_callback, this, std::placeholders::_1));
+  // Publisher on the same topic. Only the action server publishes here, and
+  // only on goal settlement (see on_feedback_tick). The self-subscription will
+  // re-trigger setpoint_callback → preempt_goal (no-op, goal already done) →
+  // setpoint_buf_ write (redundant with the direct write we already do, but
+  // harmless). Net effect: external observers see one final point on ~/setpoint
+  // matching the controller's resting target.
+  setpoint_pub_ = node->create_publisher<trajectory_msgs::msg::JointTrajectoryPoint>(
+    "~/setpoint", rclcpp::SystemDefaultsQoS());
 
   hold_srv_ = node->create_service<std_srvs::srv::Trigger>(
     "~/hold",
@@ -591,6 +599,7 @@ void PendulumPVTController::on_feedback_tick()
     // holds where the trajectory was when cancellation arrived.
     Setpoint hold{sampled[0], 0.0, 0.0};
     setpoint_buf_.writeFromNonRT(hold);
+    publish_settled_setpoint(sampled[0]);
     traj_buf_.writeFromNonRT(nullptr);
     traj_done_.store(false);
     traj_completed_clean_.store(false);
@@ -621,6 +630,7 @@ void PendulumPVTController::on_feedback_tick()
     // and keep the joint at the goal.
     Setpoint hold{sampled[0], 0.0, 0.0};
     setpoint_buf_.writeFromNonRT(hold);
+    publish_settled_setpoint(sampled[0]);
     traj_buf_.writeFromNonRT(nullptr);
     auto result = std::make_shared<FJT::Result>();
     if (traj_completed_clean_.load()) {
@@ -636,6 +646,18 @@ void PendulumPVTController::on_feedback_tick()
     traj_completed_clean_.store(false);
     active_goal_.reset();
   }
+}
+
+void PendulumPVTController::publish_settled_setpoint(double position)
+{
+  if (!setpoint_pub_) {
+    return;
+  }
+  trajectory_msgs::msg::JointTrajectoryPoint msg;
+  msg.positions     = {position};
+  msg.velocities    = {0.0};
+  msg.accelerations = {0.0};
+  setpoint_pub_->publish(msg);
 }
 
 void PendulumPVTController::on_active_setpoint_tick()
