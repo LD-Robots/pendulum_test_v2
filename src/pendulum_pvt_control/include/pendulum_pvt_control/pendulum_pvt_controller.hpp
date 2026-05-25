@@ -192,6 +192,16 @@ private:
   // are all on the controller_manager executor, serialised).
   std::shared_ptr<GoalHandleFJT> active_goal_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
+
+  // Diagnostic mirror of the resolved (ref_pos, ref_vel, ref_acc) — published
+  // at 200 Hz on ~/active_setpoint regardless of the source (trajectory /
+  // ~/setpoint / e-stop hold / post-reset hold). Lets PlotJuggler overlay
+  // "what the controller is tracking" alongside /joint_states the same way it
+  // does for pvt_goto.py's ~/setpoint stream.
+  rclcpp::Publisher<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr
+    active_setpoint_pub_;
+  rclcpp::TimerBase::SharedPtr active_setpoint_timer_;
+  void on_active_setpoint_tick();
 };
 
 }  // namespace pendulum_pvt_control

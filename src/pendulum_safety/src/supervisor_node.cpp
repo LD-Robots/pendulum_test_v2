@@ -68,6 +68,7 @@ SafetySupervisor::SafetySupervisor(const rclcpp::NodeOptions & options)
     watchdog_rate_hz_ = 200.0;
   }
   startup_grace_sec_ = declare_parameter<double>("startup_grace_sec", 2.0);
+  start_latched_ = declare_parameter<bool>("start_latched", true);
   report_period_cycles_ =
     std::max(1, static_cast<int>(std::lround(watchdog_rate_hz_ / 10.0)));
 
@@ -103,6 +104,20 @@ SafetySupervisor::SafetySupervisor(const rclcpp::NodeOptions & options)
     "/pendulum/safety/breach_reason", latched);
   diag_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
     "/diagnostics", rclcpp::QoS(10));
+
+  // Safety-by-default: boot in a latched e-stop (action FREE) so the drives
+  // stay limp until the operator calls ~/reset. Reset is gated on the joint
+  // feed being healthy (detection armed), so the system cannot be released
+  // before the supervisor is actually watching anything.
+  if (start_latched_) {
+    estop_latched_ = true;
+    latched_reason_ = BreachReason::STARTUP;
+    latched_action_ = EstopAction::FREE;
+    RCLCPP_WARN(
+      get_logger(),
+      "boot latched (STARTUP, action FREE) — call ~/reset after the joint "
+      "feed warms up to take the system out of e-stop");
+  }
 
   // Seed the latched topics so consumers spawned later get an initial value.
   publishEstopState();
@@ -237,6 +252,10 @@ EstopAction SafetySupervisor::actionFor(BreachReason reason) const
       return action_stale_;
     case BreachReason::MANUAL:
       return action_manual_;
+    case BreachReason::STARTUP:
+      // The boot-time latch is always FREE — at startup we may not yet have
+      // valid joint state to HOLD against.
+      return EstopAction::FREE;
     case BreachReason::NONE:
       return EstopAction::FREE;
   }
@@ -338,6 +357,17 @@ void SafetySupervisor::onResetRequest(
   std_srvs::srv::Trigger::Response::SharedPtr response)
 {
   (void)request;
+  // Reset is gated on detection being armed so the system cannot be released
+  // out of e-stop before the supervisor is actually watching anything (e.g.
+  // before joint states are flowing, or during the startup warm-up).
+  if (!detection_armed_) {
+    response->success = false;
+    response->message =
+      "reset refused — safety detection not yet armed (waiting for a "
+      "healthy joint feed)";
+    RCLCPP_WARN(get_logger(), "%s", response->message.c_str());
+    return;
+  }
   if (!estop_latched_) {
     response->success = true;
     response->message = "e-stop already clear";

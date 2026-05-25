@@ -144,6 +144,15 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
     std::chrono::milliseconds(100),
     [this]() { this->on_feedback_tick(); });
 
+  // Diagnostic: republish whatever ref_(pos,vel,acc) update() resolved on the
+  // last tick, at 200 Hz. PlotJuggler can compare ~/active_setpoint against
+  // /joint_states the same way it does for pvt_goto.py's ~/setpoint stream.
+  active_setpoint_pub_ = node->create_publisher<trajectory_msgs::msg::JointTrajectoryPoint>(
+    "~/active_setpoint", rclcpp::SystemDefaultsQoS());
+  active_setpoint_timer_ = node->create_wall_timer(
+    std::chrono::milliseconds(5),
+    [this]() { this->on_active_setpoint_tick(); });
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -331,8 +340,6 @@ controller_interface::return_type PendulumPVTController::update(
     ref_vel = v_ref * alpha_;
     ref_acc = a_ref * alpha_ * alpha_;
 
-    sampled_state_.writeFromNonRT({ref_pos, ref_vel, ref_acc, q});
-
     if (tv_ >= traj_ptr->duration) {
       traj_completed_clean_.store(true);
       traj_done_.store(true);
@@ -342,6 +349,13 @@ controller_interface::return_type PendulumPVTController::update(
     ref_vel = sp.velocity;
     ref_acc = sp.acceleration;
   }
+
+  // Snapshot the resolved reference for both FJT feedback and the diagnostic
+  // ~/active_setpoint publisher. Single write covers every branch above
+  // (trajectory / ~/setpoint / e-stop hold / post-reset hold) — the topic is
+  // always live as long as the controller is past the early-return for
+  // missing state.
+  sampled_state_.writeFromNonRT({ref_pos, ref_vel, ref_acc, q});
 
   // Slew- and acceleration-limit the position command, then clamp it and the
   // velocity command to the software limits. Re-seed the limiter from the
@@ -622,6 +636,19 @@ void PendulumPVTController::on_feedback_tick()
     traj_completed_clean_.store(false);
     active_goal_.reset();
   }
+}
+
+void PendulumPVTController::on_active_setpoint_tick()
+{
+  if (!active_setpoint_pub_) {
+    return;
+  }
+  const auto sampled = *sampled_state_.readFromNonRT();
+  trajectory_msgs::msg::JointTrajectoryPoint msg;
+  msg.positions     = {sampled[0]};
+  msg.velocities    = {sampled[1]};
+  msg.accelerations = {sampled[2]};
+  active_setpoint_pub_->publish(msg);
 }
 
 void PendulumPVTController::sample_trajectory(

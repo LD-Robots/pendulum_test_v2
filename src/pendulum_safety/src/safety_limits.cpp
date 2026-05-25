@@ -17,6 +17,7 @@ const char * to_string(BreachReason reason)
     case BreachReason::SUSTAINED_EFFORT:  return "SUSTAINED_EFFORT";
     case BreachReason::STALE_JOINT_STATE: return "STALE_JOINT_STATE";
     case BreachReason::MANUAL:            return "MANUAL";
+    case BreachReason::STARTUP:           return "STARTUP";
   }
   return "UNKNOWN";
 }

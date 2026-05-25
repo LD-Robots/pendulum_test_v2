@@ -20,6 +20,7 @@ enum class BreachReason : uint8_t
   SUSTAINED_EFFORT,
   STALE_JOINT_STATE,
   MANUAL,
+  STARTUP,    ///< boot-time latch: drives limp until the operator calls ~/reset
 };
 
 /// What a control path should do while an e-stop is latched.

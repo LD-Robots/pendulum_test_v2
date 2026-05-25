@@ -63,6 +63,9 @@ private:
   bool effort_from_joint_state_{false};
   double watchdog_rate_hz_{200.0};
   int report_period_cycles_{20};
+  // Safety-by-default: boot latched (BreachReason::STARTUP, action FREE) so the
+  // drives stay limp until the operator calls ~/reset.
+  bool start_latched_{true};
   EstopAction action_temperature_{EstopAction::FREE};
   EstopAction action_overspeed_{EstopAction::FREE};
   EstopAction action_position_{EstopAction::HOLD};

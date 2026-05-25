@@ -123,6 +123,9 @@ SLIDER_SCALE = 10000
 SUPPORTED_CONTROLLER_TYPES = {
     "joint_trajectory_controller/JointTrajectoryController": "action",
     "position_controllers/JointGroupPositionController": "topic",
+    # PVT controller exposes a FJT action at the same conventional name
+    # (~/follow_joint_trajectory); the GUI's "action" path works as-is.
+    "pendulum_pvt_control/PendulumPVTController": "action",
 }
 
 # Strip ANSI escape codes

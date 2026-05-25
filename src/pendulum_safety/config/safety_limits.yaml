@@ -58,6 +58,9 @@ pendulum_safety_supervisor:
     # Breach detection arms only after the joint feed is continuously fresh for
     # this long — bringup transients then cannot latch a spurious e-stop.
     startup_grace_sec: 2.0
+    # Boot in a latched e-stop so the drives stay limp until the operator
+    # calls ~/reset. Reset is gated on detection being armed.
+    start_latched: true
     action.temperature: free
     action.overspeed: hold
     action.position: hold

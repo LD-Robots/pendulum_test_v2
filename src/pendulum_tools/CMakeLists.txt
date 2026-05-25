@@ -12,6 +12,12 @@ install(PROGRAMS
   RENAME action_position_sender
 )
 
+install(PROGRAMS
+  ${PROJECT_NAME}/pvt_tuner.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME pvt_tuner
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
