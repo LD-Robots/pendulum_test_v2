@@ -223,6 +223,15 @@ controller_interface::return_type PendulumPVTController::update(
       estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
     }
   }
+  // Falling edge — the e-stop just cleared. Hold at the current joint
+  // position until a fresh ~/setpoint arrives, so the controller does not
+  // resume toward a stale buffered point. setpoint_callback / hold_service
+  // clear waiting_for_setpoint_ when a fresh setpoint comes in.
+  if (!safety.estop_active && estop_was_active_) {
+    resume_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    rate_limiter_.seed(q);
+    waiting_for_setpoint_.store(true);
+  }
   estop_was_active_ = safety.estop_active;
 
   // E-stop FREE, or the controller's own FREE mode when no e-stop overrides
@@ -236,14 +245,22 @@ controller_interface::return_type PendulumPVTController::update(
     return controller_interface::return_type::OK;
   }
 
-  // Reference: an active e-stop HOLD overrides the streamed setpoint.
-  double ref_pos = sp.position;
-  double ref_vel = sp.velocity;
-  double ref_acc = sp.acceleration;
+  // Reference: an active e-stop HOLD overrides the streamed setpoint; after a
+  // reset we hold at resume_hold_pos_ until a fresh ~/setpoint arrives, so
+  // the joint does not lunge to a stale buffered point.
+  double ref_pos, ref_vel, ref_acc;
   if (safety.estop_active) {   // HOLD — FREE already returned above
     ref_pos = estop_hold_pos_;
     ref_vel = 0.0;
     ref_acc = 0.0;
+  } else if (waiting_for_setpoint_.load()) {
+    ref_pos = resume_hold_pos_;
+    ref_vel = 0.0;
+    ref_acc = 0.0;
+  } else {
+    ref_pos = sp.position;
+    ref_vel = sp.velocity;
+    ref_acc = sp.acceleration;
   }
 
   // Slew- and acceleration-limit the position command, then clamp it and the
@@ -295,8 +312,10 @@ void PendulumPVTController::setpoint_callback(
   if (!msg->velocities.empty())    sp.velocity     = msg->velocities[0];
   if (!msg->accelerations.empty()) sp.acceleration = msg->accelerations[0];
   setpoint_buf_.writeFromNonRT(sp);
-  // A streaming setpoint implies the caller wants tracking — switch to PVT.
+  // A streaming setpoint implies the caller wants tracking — switch to PVT
+  // and clear any post-reset hold so the controller resumes following.
   mode_.store(Mode::PVT);
+  waiting_for_setpoint_.store(false);
 }
 
 void PendulumPVTController::hold_service(
@@ -313,6 +332,7 @@ void PendulumPVTController::hold_service(
   }
   setpoint_buf_.writeFromNonRT(sp);
   mode_.store(Mode::PVT);
+  waiting_for_setpoint_.store(false);
   response->success = true;
   response->message = "Holding at q = " + std::to_string(sp.position);
 }

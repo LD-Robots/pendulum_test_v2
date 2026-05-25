@@ -158,6 +158,14 @@ controller_interface::return_type PendulumPDController::update(
       estop_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
     }
   }
+  // Falling edge — the e-stop just cleared. Hold at the current joint
+  // position until a fresh ~/setpoint arrives, so the controller does not
+  // resume toward a stale buffered point. setpoint_callback / hold_service
+  // clear waiting_for_setpoint_ when a fresh setpoint comes in.
+  if (!safety.estop_active && estop_was_active_) {
+    resume_hold_pos_ = pendulum_safety::clampPosition(q, limits_);
+    waiting_for_setpoint_.store(true);
+  }
   estop_was_active_ = safety.estop_active;
 
   // Thermal Kp derating from the supervisor (1.0 when no supervisor / cool).
@@ -179,11 +187,21 @@ controller_interface::return_type PendulumPDController::update(
     tau = params_.comp_sign * (tau_g + tau_v) + tau_pd;
     tau = pendulum_safety::clampEffort(tau, limits_);
   } else if (mode != Mode::FREE) {
-    // Normal operation — TUNE is feedforward only, PD adds the PD term.
-    const double ref_pos = pendulum_safety::clampPosition(sp.position, limits_);
-    const double ref_vel = pendulum_safety::clampVelocity(sp.velocity, limits_);
+    // Normal operation — TUNE is feedforward only, PD adds the PD term. After
+    // an e-stop reset, hold at resume_hold_pos_ until a fresh ~/setpoint
+    // arrives, so the joint does not lunge to a stale buffered point.
+    double ref_pos, ref_vel, ref_acc;
+    if (waiting_for_setpoint_.load()) {
+      ref_pos = resume_hold_pos_;
+      ref_vel = 0.0;
+      ref_acc = 0.0;
+    } else {
+      ref_pos = pendulum_safety::clampPosition(sp.position, limits_);
+      ref_vel = pendulum_safety::clampVelocity(sp.velocity, limits_);
+      ref_acc = sp.acceleration;
+    }
     const double tau_g = params_.ff_gravity ? params_.mgl * std::sin(q) : 0.0;
-    const double tau_J = params_.ff_inertia ? params_.J * sp.acceleration : 0.0;
+    const double tau_J = params_.ff_inertia ? params_.J * ref_acc : 0.0;
     const double tau_v = params_.ff_viscous ? params_.Fv * qd : 0.0;
     const double tau_pd = (mode == Mode::PD)
       ? kp_eff * (ref_pos - q) + params_.Kd * (ref_vel - qd)
@@ -204,8 +222,10 @@ void PendulumPDController::setpoint_callback(
   if (!msg->velocities.empty())    sp.velocity     = msg->velocities[0];
   if (!msg->accelerations.empty()) sp.acceleration = msg->accelerations[0];
   setpoint_buf_.writeFromNonRT(sp);
-  // A streaming setpoint implies the caller wants tracking — switch to PD.
+  // A streaming setpoint implies the caller wants tracking — switch to PD
+  // and clear any post-reset hold so the controller resumes following.
   mode_.store(Mode::PD);
+  waiting_for_setpoint_.store(false);
 }
 
 void PendulumPDController::hold_service(
@@ -222,6 +242,7 @@ void PendulumPDController::hold_service(
   }
   setpoint_buf_.writeFromNonRT(sp);
   mode_.store(Mode::PD);
+  waiting_for_setpoint_.store(false);
   response->success = true;
   response->message = "Holding at q = " + std::to_string(sp.position);
 }

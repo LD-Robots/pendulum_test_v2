@@ -86,6 +86,10 @@ private:
   pendulum_safety::EstopSubscriber safety_;
   double estop_hold_pos_{0.0};   // joint position snapshotted when e-stop fires
   bool estop_was_active_{false};
+  // After a reset (e-stop falling edge) we hold here until a fresh ~/setpoint
+  // arrives — prevents the joint from lunging to a stale buffered point.
+  double resume_hold_pos_{0.0};
+  std::atomic<bool> waiting_for_setpoint_{false};
 
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr hold_srv_;
