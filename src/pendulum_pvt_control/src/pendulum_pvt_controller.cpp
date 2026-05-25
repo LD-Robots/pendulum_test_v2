@@ -324,33 +324,45 @@ controller_interface::return_type PendulumPVTController::update(
     ref_pos = resume_hold_pos_;
     ref_vel = 0.0;
     ref_acc = 0.0;
-  } else if (auto traj_ptr = *traj_buf_.readFromRT(); traj_ptr && !traj_done_.load()) {
-    // Sample at the current virtual time *before* advancing tv_, so the lag
-    // governor measures lead against the reference about to be commanded.
-    double p_ref, v_ref, a_ref;
-    sample_trajectory(*traj_ptr, tv_, p_ref, v_ref, a_ref);
+  } else if (auto traj_ptr = *traj_buf_.readFromRT(); traj_ptr) {
+    if (!traj_done_.load()) {
+      // Sample at the current virtual time *before* advancing tv_, so the lag
+      // governor measures lead against the reference about to be commanded.
+      double p_ref, v_ref, a_ref;
+      sample_trajectory(*traj_ptr, tv_, p_ref, v_ref, a_ref);
 
-    // Lag governor — port of pvt_goto.py:174-189. `lead` is how far the
-    // reference is ahead of the joint in the direction of net travel; the
-    // time-scale alpha goes to 0 at lag_pause and stays at 1 below lag_free.
-    const double dt = period.seconds();
-    const double lead = (p_ref - q) * dq_sign_;
-    const double denom = std::max(params_.lag_pause - params_.lag_free, 1e-6);
-    double alpha_target = (params_.lag_pause - lead) / denom;
-    alpha_target = std::clamp(alpha_target, 0.0, 1.0);
-    const double max_step = params_.alpha_slew * dt;
-    alpha_ += std::clamp(alpha_target - alpha_, -max_step, +max_step);
-    alpha_ = std::clamp(alpha_, 0.0, 1.0);
+      // Lag governor — port of pvt_goto.py:174-189. `lead` is how far the
+      // reference is ahead of the joint in the direction of net travel; the
+      // time-scale alpha goes to 0 at lag_pause and stays at 1 below lag_free.
+      const double dt = period.seconds();
+      const double lead = (p_ref - q) * dq_sign_;
+      const double denom = std::max(params_.lag_pause - params_.lag_free, 1e-6);
+      double alpha_target = (params_.lag_pause - lead) / denom;
+      alpha_target = std::clamp(alpha_target, 0.0, 1.0);
+      const double max_step = params_.alpha_slew * dt;
+      alpha_ += std::clamp(alpha_target - alpha_, -max_step, +max_step);
+      alpha_ = std::clamp(alpha_, 0.0, 1.0);
 
-    // Advance the virtual clock; chain-rule v and a for the scaled time.
-    tv_ = std::min(tv_ + alpha_ * dt, traj_ptr->duration);
-    ref_pos = p_ref;
-    ref_vel = v_ref * alpha_;
-    ref_acc = a_ref * alpha_ * alpha_;
+      // Advance the virtual clock; chain-rule v and a for the scaled time.
+      tv_ = std::min(tv_ + alpha_ * dt, traj_ptr->duration);
+      ref_pos = p_ref;
+      ref_vel = v_ref * alpha_;
+      ref_acc = a_ref * alpha_ * alpha_;
 
-    if (tv_ >= traj_ptr->duration) {
-      traj_completed_clean_.store(true);
-      traj_done_.store(true);
+      if (tv_ >= traj_ptr->duration) {
+        traj_completed_clean_.store(true);
+        traj_done_.store(true);
+      }
+    } else {
+      // Trajectory finished but on_feedback_tick has not finalised the goal
+      // yet (up to ~100 ms). Hold the endpoint so sampled_state_ keeps
+      // reporting it — both ~/active_setpoint and the upcoming ~/setpoint
+      // republish read it. Without this branch we would fall through to the
+      // legacy sp.position (== hold_position, typically 0.0) and publish
+      // zeros for the entire 0–100 ms gap.
+      ref_pos = traj_ptr->knots.back().pos;
+      ref_vel = 0.0;
+      ref_acc = 0.0;
     }
   } else {
     ref_pos = sp.position;
