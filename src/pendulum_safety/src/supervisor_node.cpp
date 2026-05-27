@@ -18,7 +18,7 @@ namespace
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
-/// Parse a "free" / "hold" YAML string into an EstopAction.
+/// Parse a "free" / "hold" / "damp" YAML string into an EstopAction.
 EstopAction parseAction(const std::string & text, EstopAction fallback)
 {
   if (text == "hold" || text == "HOLD") {
@@ -26,6 +26,11 @@ EstopAction parseAction(const std::string & text, EstopAction fallback)
   }
   if (text == "free" || text == "FREE") {
     return EstopAction::FREE;
+  }
+  if (text == "damp" || text == "DAMP" ||
+      text == "damping" || text == "DAMPING")
+  {
+    return EstopAction::DAMPING;
   }
   return fallback;
 }
@@ -276,9 +281,16 @@ void SafetySupervisor::latch(BreachReason reason)
 void SafetySupervisor::publishEstopState()
 {
   std_msgs::msg::Int8 state;
-  state.data = !estop_latched_
-    ? 0
-    : (latched_action_ == EstopAction::HOLD ? 2 : 1);
+  if (!estop_latched_) {
+    state.data = 0;
+  } else {
+    switch (latched_action_) {
+      case EstopAction::HOLD:    state.data = 2; break;
+      case EstopAction::DAMPING: state.data = 3; break;
+      case EstopAction::FREE:    [[fallthrough]];
+      default:                   state.data = 1; break;
+    }
+  }
   estop_pub_->publish(state);
 
   std_msgs::msg::String breach;

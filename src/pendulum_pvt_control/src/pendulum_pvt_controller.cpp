@@ -30,6 +30,7 @@ controller_interface::CallbackReturn PendulumPVTController::on_init()
     auto_declare<std::string>("joint", "");
     auto_declare<double>("Kp", 0.0);
     auto_declare<double>("Kd", 0.0);
+    auto_declare<double>("Kd_damp", 1.0);
     auto_declare<double>("mgl", 0.0);
     auto_declare<double>("J", 0.0);
     auto_declare<double>("Fv", 0.0);
@@ -55,6 +56,7 @@ void PendulumPVTController::load_params()
   params_.joint         = node->get_parameter("joint").as_string();
   params_.Kp            = node->get_parameter("Kp").as_double();
   params_.Kd            = node->get_parameter("Kd").as_double();
+  params_.Kd_damp       = node->get_parameter("Kd_damp").as_double();
   params_.mgl           = node->get_parameter("mgl").as_double();
   params_.J             = node->get_parameter("J").as_double();
   params_.Fv            = node->get_parameter("Fv").as_double();
@@ -73,6 +75,9 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   load_params();
+  // Seed the RT-readable snapshot so the first update() tick after activation
+  // sees the configured values rather than a default-constructed Params.
+  params_buf_.writeFromNonRT(params_);
 
   if (params_.joint.empty()) {
     RCLCPP_ERROR(get_node()->get_logger(), "Parameter 'joint' is required.");
@@ -129,13 +134,17 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
     "~/free",
     std::bind(&PendulumPVTController::free_service, this,
               std::placeholders::_1, std::placeholders::_2));
+  damp_srv_ = node->create_service<std_srvs::srv::Trigger>(
+    "~/damp",
+    std::bind(&PendulumPVTController::damp_service, this,
+              std::placeholders::_1, std::placeholders::_2));
 
   // Action server. get_node() is lifecycle-backed, so pass the interface
   // pointers explicitly. action callbacks land on the controller_manager
   // executor thread, the same one that runs setpoint_callback / hold_service /
   // free_service — so all non-RT writes to controller state are serialised.
   traj_buf_.writeFromNonRT(nullptr);
-  sampled_state_.writeFromNonRT({0.0, 0.0, 0.0, 0.0});
+  sampled_state_.set(std::array<double, 4>{0.0, 0.0, 0.0, 0.0});
   action_server_ = rclcpp_action::create_server<FJT>(
     node->get_node_base_interface(),
     node->get_node_clock_interface(),
@@ -167,6 +176,22 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
   active_setpoint_timer_ = node->create_wall_timer(
     std::chrono::milliseconds(5),
     [this]() { this->on_active_setpoint_tick(); });
+
+  // Live param re-tune (`ros2 param set Kp 12.3`) lands on the executor
+  // thread; refresh the RT snapshot from there so update() never has to take
+  // the rclcpp parameter mutex on the RT path.
+  post_set_param_cb_ = node->add_post_set_parameters_callback(
+    [this, node](const std::vector<rclcpp::Parameter> & /*params*/) {
+      load_params();
+      params_buf_.writeFromNonRT(params_);
+      // Diagnostic: confirms `ros2 param set` (or the tuner Apply) actually
+      // landed and that the new values are now in the RT snapshot. Remove or
+      // downgrade to DEBUG once param-set behaviour is verified.
+      RCLCPP_INFO(node->get_logger(),
+        "post_set fired: Kp=%.3f Kd=%.3f Kd_damp=%.3f ff_gravity=%d",
+        params_.Kp, params_.Kd, params_.Kd_damp,
+        static_cast<int>(params_.ff_gravity));
+    });
 
   return controller_interface::CallbackReturn::SUCCESS;
 }
@@ -205,6 +230,7 @@ controller_interface::CallbackReturn PendulumPVTController::on_activate(
 {
   // Refresh in case the user changed params between configure and activate.
   load_params();
+  params_buf_.writeFromNonRT(params_);
 
   // Default to FREE on activation so a stale setpoint can't kick the joint.
   mode_.store(Mode::FREE);
@@ -247,12 +273,52 @@ void PendulumPVTController::write_free_outputs()
   }
 }
 
+void PendulumPVTController::write_damping_outputs()
+{
+  if (command_interfaces_.empty()) {
+    return;
+  }
+  double q = 0.0;
+  double qd = 0.0;
+  if (state_interfaces_.size() >= 2) {
+    const auto pos_opt = state_interfaces_[0].get_optional();
+    const auto vel_opt = state_interfaces_[1].get_optional();
+    if (pos_opt) {q  = pos_opt.value();}
+    if (vel_opt) {qd = vel_opt.value();}
+  }
+  if (drive_side_pd_) {
+    // Drive's MIT law collapses to tau = 0*(q_des-q) + Kd_damp*(0-qd) = -Kd_damp*qd.
+    // position=q + velocity=0 are harmless when kp=0; effort=0 leaves the host
+    // feedforward channel quiet (gravity/inertia/viscous are skipped in DAMPING).
+    (void)command_interfaces_[kCmdPosition].set_value(q);
+    (void)command_interfaces_[kCmdVelocity].set_value(0.0);
+    (void)command_interfaces_[kCmdEffort].set_value(0.0);
+    (void)command_interfaces_[kCmdKp].set_value(0.0);
+    (void)command_interfaces_[kCmdKd].set_value(params_.Kd_damp);
+  } else {
+    // Sim — replicate the brake in software. clampEffort honours the safety cap.
+    const double tau = pendulum_safety::clampEffort(
+      -params_.Kd_damp * qd, limits_);
+    (void)command_interfaces_[kCmdSimEffort].set_value(tau);
+  }
+}
+
 controller_interface::return_type PendulumPVTController::update(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
   // Refresh gains & FF flags live — lets the user ramp Kp/Kd or toggle
   // ff_gravity via `ros2 param set` without re-spawning the controller.
-  load_params();
+  // readFromRT uses try_to_lock; if the post-set callback is mid-write we
+  // simply see the previous snapshot, one cycle stale — never a stall.
+  params_ = *params_buf_.readFromRT();
+
+  // Diagnostic: confirms update() reads the freshly-set values. Throttled to
+  // ~1 Hz so the RT log volume stays sane. Remove once param-set behaviour
+  // is verified.
+  RCLCPP_INFO_THROTTLE(
+    get_node()->get_logger(), *get_node()->get_clock(), 1000,
+    "active params: Kp=%.3f Kd=%.3f Kd_damp=%.3f",
+    params_.Kp, params_.Kd, params_.Kd_damp);
 
   const pendulum_safety::SafetySignal safety = safety_.get();
   const auto mode = mode_.load();
@@ -307,13 +373,25 @@ controller_interface::return_type PendulumPVTController::update(
   estop_was_active_ = safety.estop_active;
 
   // E-stop FREE, or the controller's own FREE mode when no e-stop overrides
-  // it, drives the neutral zero-torque output. An e-stop HOLD takes precedence
-  // over FREE mode — safety must hold the joint regardless of controller mode.
+  // it, drives the neutral zero-torque output. An e-stop HOLD/DAMPING takes
+  // precedence over FREE mode — safety must apply its chosen response
+  // regardless of controller mode.
   const bool estop_free =
     safety.estop_active && safety.action == pendulum_safety::EstopAction::FREE;
   if (estop_free || (mode == Mode::FREE && !safety.estop_active)) {
     rate_limiter_.reset();
     write_free_outputs();
+    return controller_interface::return_type::OK;
+  }
+
+  // E-stop DAMPING, or the controller's own DAMPING mode when no e-stop is
+  // active, drives the viscous-brake output. The rate limiter must reset so
+  // a later resume into PVT mode re-seeds from the actual joint position.
+  const bool estop_damp =
+    safety.estop_active && safety.action == pendulum_safety::EstopAction::DAMPING;
+  if (estop_damp || (mode == Mode::DAMPING && !safety.estop_active)) {
+    rate_limiter_.reset();
+    write_damping_outputs();
     return controller_interface::return_type::OK;
   }
 
@@ -381,8 +459,9 @@ controller_interface::return_type PendulumPVTController::update(
   // ~/active_setpoint publisher. Single write covers every branch above
   // (trajectory / ~/setpoint / e-stop hold / post-reset hold) — the topic is
   // always live as long as the controller is past the early-return for
-  // missing state.
-  sampled_state_.writeFromNonRT({ref_pos, ref_vel, ref_acc, q});
+  // missing state. try_set is non-blocking; if a reader currently holds the
+  // PI-mutex we skip this cycle's write (1 ms staleness, invisible).
+  sampled_state_.try_set(std::array<double, 4>{ref_pos, ref_vel, ref_acc, q});
 
   // Slew- and acceleration-limit the position command, then clamp it and the
   // velocity command to the software limits. Re-seed the limiter from the
@@ -469,6 +548,21 @@ void PendulumPVTController::free_service(
   mode_.store(Mode::FREE);
   response->success = true;
   response->message = "FREE mode — zero drive torque";
+}
+
+void PendulumPVTController::damp_service(
+  const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+  std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+  // DAMPING has no reference position — the brake settles wherever the joint
+  // stops. Pre-empt any in-flight goal so the RT loop stops sampling, drop
+  // waiting_for_setpoint_ so a stale post-reset hold doesn't fight the brake.
+  preempt_goal("preempted by ~/damp");
+  mode_.store(Mode::DAMPING);
+  waiting_for_setpoint_.store(false);
+  response->success = true;
+  response->message = "DAMPING mode — tau = -Kd_damp * qd, Kd_damp = " +
+    std::to_string(params_.Kd_damp);
 }
 
 void PendulumPVTController::preempt_goal(const std::string & why)
@@ -597,7 +691,7 @@ void PendulumPVTController::handle_accepted(
   dq_sign_ = (traj->knots.back().pos >= traj->knots.front().pos) ? 1.0 : -1.0;
   traj_done_.store(false);
   traj_completed_clean_.store(false);
-  sampled_state_.writeFromNonRT({traj->knots.front().pos, 0.0, 0.0, q_start});
+  sampled_state_.set(std::array<double, 4>{traj->knots.front().pos, 0.0, 0.0, q_start});
 
   traj_buf_.writeFromNonRT(std::shared_ptr<const Trajectory>(std::move(traj)));
   mode_.store(Mode::PVT);
@@ -613,7 +707,7 @@ void PendulumPVTController::on_feedback_tick()
 
   // Client-requested cancel takes priority over completion / pre-emption.
   if (active_goal_->is_canceling()) {
-    const auto sampled = *sampled_state_.readFromRT();
+    const auto sampled = sampled_state_.get();
     // Snapshot the last commanded position into setpoint_buf_ so the joint
     // holds where the trajectory was when cancellation arrived.
     Setpoint hold{sampled[0], 0.0, 0.0};
@@ -630,7 +724,7 @@ void PendulumPVTController::on_feedback_tick()
     return;
   }
 
-  const auto sampled = *sampled_state_.readFromRT();
+  const auto sampled = sampled_state_.get();
 
   // Standard FJT feedback: desired / actual / error. We only track the single
   // joint, so the JointTolerance vectors in path_/goal_tolerance are not used.
@@ -684,7 +778,7 @@ void PendulumPVTController::on_active_setpoint_tick()
   if (!active_setpoint_pub_) {
     return;
   }
-  const auto sampled = *sampled_state_.readFromNonRT();
+  const auto sampled = sampled_state_.get();
   trajectory_msgs::msg::JointTrajectoryPoint msg;
   msg.positions     = {sampled[0]};
   msg.velocities    = {sampled[1]};

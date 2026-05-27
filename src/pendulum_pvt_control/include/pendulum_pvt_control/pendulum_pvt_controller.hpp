@@ -18,6 +18,7 @@
 #include "rclcpp_action/rclcpp_action.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "realtime_tools/realtime_buffer.hpp"
+#include "realtime_tools/realtime_thread_safe_box.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
 
@@ -26,8 +27,9 @@ namespace pendulum_pvt_control
 
 enum class Mode : uint8_t
 {
-  FREE = 0,   // neutral output — drive produces zero torque
-  PVT  = 1,   // active — track the streaming setpoint
+  FREE    = 0,   // neutral output — drive produces zero torque
+  PVT     = 1,   // active — track the streaming setpoint
+  DAMPING = 2,   // viscous brake — tau = -Kd_damp * qd, no position term
 };
 
 class PendulumPVTController : public controller_interface::ControllerInterface
@@ -85,6 +87,10 @@ private:
     std::string joint;
     double Kp{0.0};
     double Kd{0.0};
+    // Damping-mode gain. Used when Mode::DAMPING is active (button / ~/damp
+    // service) or when an e-stop fires with action=DAMPING. Independent of Kd
+    // so the brake can be tuned without disturbing tracking gains.
+    double Kd_damp{1.0};
     double mgl{0.0};
     double J{0.0};
     double Fv{0.0};
@@ -108,11 +114,18 @@ private:
   // drive_side_pd mode that means kp=kd=effort=velocity=0 and position=q so the
   // drive's law collapses to zero torque; in sim it means effort=0.
   void write_free_outputs();
+  // Write a viscous-brake command: kp=0, kd=Kd_damp, position=q, velocity=0,
+  // effort=0 — drive's law collapses to tau = -Kd_damp * qd. In sim, compute
+  // -Kd_damp * qd in software and write effort only.
+  void write_damping_outputs();
   void setpoint_callback(const trajectory_msgs::msg::JointTrajectoryPoint::SharedPtr msg);
   void hold_service(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
   void free_service(
+    const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+    std::shared_ptr<std_srvs::srv::Trigger::Response> response);
+  void damp_service(
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
@@ -146,6 +159,12 @@ private:
     double & p, double & v, double & a);
 
   Params params_;
+  // RT-safe parameter snapshot. Written by add_post_set_parameters_callback on
+  // the executor thread when `ros2 param set` lands; read lock-free in update()
+  // via try_lock so the RT thread never blocks on the rclcpp parameter mutex.
+  realtime_tools::RealtimeBuffer<Params> params_buf_;
+  rclcpp_lifecycle::LifecycleNode::PostSetParametersCallbackHandle::SharedPtr
+    post_set_param_cb_;
   // Cached from params_ in on_configure — command_interface_configuration() runs
   // before activation and must agree with the index order used in update().
   bool drive_side_pd_{true};
@@ -171,6 +190,7 @@ private:
   rclcpp::Publisher<trajectory_msgs::msg::JointTrajectoryPoint>::SharedPtr setpoint_pub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr hold_srv_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr free_srv_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr damp_srv_;
 
   realtime_tools::RealtimeBuffer<Setpoint> setpoint_buf_;
   std::atomic<Mode> mode_{Mode::FREE};
@@ -193,9 +213,12 @@ private:
   double alpha_{1.0};
   double dq_sign_{1.0};
 
-  // RT-published snapshot for the 10 Hz feedback timer: {ref_pos, ref_vel,
-  // ref_acc, measured_q}. Written every tick while a trajectory is active.
-  realtime_tools::RealtimeBuffer<std::array<double, 4>> sampled_state_;
+  // RT-published snapshot for the 10 Hz feedback timer and 200 Hz
+  // ~/active_setpoint timer: {ref_pos, ref_vel, ref_acc, measured_q}. RT writes
+  // best-effort via try_set; the (priority-inheriting) mutex bounds reader-side
+  // contention so the RT thread can never wait on a preempted executor thread.
+  realtime_tools::RealtimeThreadSafeBox<std::array<double, 4>> sampled_state_{
+    std::array<double, 4>{0.0, 0.0, 0.0, 0.0}};
 
   // Touched only on the executor thread (action callbacks + feedback timer
   // are all on the controller_manager executor, serialised).

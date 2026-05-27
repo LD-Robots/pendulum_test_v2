@@ -2,10 +2,10 @@
 """Pendulum PVT tuner — live gain tuning, mode toggle, e-stop, telemetry.
 
 Discovers any active PVT controller by scanning the ROS service graph for nodes
-that expose both ``~/hold`` and ``~/free`` Trigger services, lets the user edit
-Kp / Kd / mgl / ff_gravity, toggle HOLD ↔ FREE, drive the supervisor e-stop &
-reset, and live-monitors bus voltage, motor / drive temperature, following
-error, and the latched safety state.
+that expose ``~/hold`` / ``~/free`` / ``~/damp`` Trigger services, lets the user
+edit Kp / Kd / Kd_damp / mgl / ff_gravity, toggle HOLD / FREE / DAMP, drive the
+supervisor e-stop & reset, and live-monitors bus voltage, motor / drive
+temperature, following error, and the latched safety state.
 
 Single-file by design — palette and ros2-CLI helpers are inlined.
 """
@@ -20,7 +20,7 @@ import time
 import rclpy
 from controller_manager_msgs.srv import ListControllers
 from rcl_interfaces.msg import Parameter as ParameterMsg, ParameterType, ParameterValue
-from rcl_interfaces.srv import GetParameters, SetParameters
+from rcl_interfaces.srv import GetParameters, ListParameters, SetParameters
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from std_msgs.msg import Float64, Int8, String
@@ -38,8 +38,12 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -126,6 +130,8 @@ class PvtTunerWindow(QMainWindow):
     _discovery_sig = pyqtSignal(list, object, int, str)  # pvt, broadcaster, count, source
     _params_loaded_sig = pyqtSignal(str, object)  # ctrl, values dict
     _apply_results_sig = pyqtSignal(object)  # list of (name, ok, msg)
+    _all_params_sig = pyqtSignal(str, object)  # ctrl, {name: value}
+    _param_set_sig = pyqtSignal(str, bool, str)  # name, ok, message
 
     def __init__(self, node: Node):
         super().__init__()
@@ -142,19 +148,25 @@ class PvtTunerWindow(QMainWindow):
         self._telem_subs: dict[str, object] = {}
         self._broadcaster_ns: str | None = None
 
-        # Build UI
-        root = QWidget()
-        self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
+        # Build UI — two tabs: focused tuner + full parameter table
+        self._tabs = QTabWidget()
+        self.setCentralWidget(self._tabs)
+
+        tuner_tab = QWidget()
+        layout = QVBoxLayout(tuner_tab)
         layout.setSpacing(10)
         layout.setContentsMargins(12, 12, 12, 12)
-
         self._build_controller_box(layout)
         self._build_gains_box(layout)
         self._build_mode_box(layout)
         self._build_safety_box(layout)
         self._build_telem_box(layout)
         layout.addStretch()
+        self._tabs.addTab(tuner_tab, "Tuner")
+
+        params_tab = QWidget()
+        self._build_params_tab(params_tab)
+        self._tabs.addTab(params_tab, "All parameters")
 
         # Wire cross-thread signals
         self._voltage_sig.connect(self._on_voltage)
@@ -167,6 +179,8 @@ class PvtTunerWindow(QMainWindow):
         self._discovery_sig.connect(self._on_discovery_result)
         self._params_loaded_sig.connect(self._on_params_loaded)
         self._apply_results_sig.connect(self._on_apply_results)
+        self._all_params_sig.connect(self._on_all_params_loaded)
+        self._param_set_sig.connect(self._on_param_set)
 
         # Subscriptions that don't depend on controller discovery
         self._setup_safety_subs()
@@ -211,6 +225,7 @@ class PvtTunerWindow(QMainWindow):
 
         self._kp_spin = self._make_spin(0.0, 1000.0, 0.5, 3)
         self._kd_spin = self._make_spin(0.0, 100.0, 0.1, 3)
+        self._kd_damp_spin = self._make_spin(0.0, 20.0, 0.1, 3)
         self._mgl_spin = self._make_spin(-100.0, 100.0, 0.01, 4)
         self._ff_grav_check = QCheckBox("ff_gravity")
 
@@ -222,6 +237,8 @@ class PvtTunerWindow(QMainWindow):
         grid.addWidget(self._mgl_spin, 0, 5)
 
         grid.addWidget(self._ff_grav_check, 1, 0, 1, 2)
+        grid.addWidget(QLabel("Kd_damp"), 1, 2)
+        grid.addWidget(self._kd_damp_spin, 1, 3)
 
         self._read_btn = QPushButton("Read")
         self._read_btn.setStyleSheet(
@@ -265,6 +282,14 @@ class PvtTunerWindow(QMainWindow):
         )
         self._free_btn.clicked.connect(lambda: self._call_controller_trigger("free"))
         h.addWidget(self._free_btn)
+
+        self._damp_btn = QPushButton("DAMP")
+        self._damp_btn.setStyleSheet(
+            f"background-color: {C_SURFACE0}; color: {C_PEACH}; "
+            f"border: 2px solid {C_PEACH};"
+        )
+        self._damp_btn.clicked.connect(lambda: self._call_controller_trigger("damp"))
+        h.addWidget(self._damp_btn)
         v.addLayout(h)
 
         self._mode_label = QLabel("last action: —")
@@ -554,9 +579,11 @@ class PvtTunerWindow(QMainWindow):
         threading.Thread(
             target=self._load_controller_params, args=(name,), daemon=True
         ).start()
+        # Auto-load the All Parameters tab too so it's never stale.
+        self._refresh_all_params_async()
 
     def _load_controller_params(self, ctrl: str):
-        names = ["Kp", "Kd", "mgl", "ff_gravity", "joint"]
+        names = ["Kp", "Kd", "Kd_damp", "mgl", "ff_gravity", "joint"]
         print(f"[pvt_tuner] get_parameters({ctrl}, {names})",
               file=sys.stderr, flush=True)
         values = self._rclpy_get_params(ctrl, names)
@@ -569,6 +596,7 @@ class PvtTunerWindow(QMainWindow):
             return
         kp = values.get("Kp")
         kd = values.get("Kd")
+        kd_damp = values.get("Kd_damp")
         mgl = values.get("mgl")
         ff_g = values.get("ff_gravity")
         joint = values.get("joint")
@@ -576,6 +604,8 @@ class PvtTunerWindow(QMainWindow):
             self._kp_spin.setValue(float(kp))
         if isinstance(kd, (int, float)) and not isinstance(kd, bool):
             self._kd_spin.setValue(float(kd))
+        if isinstance(kd_damp, (int, float)) and not isinstance(kd_damp, bool):
+            self._kd_damp_spin.setValue(float(kd_damp))
         if isinstance(mgl, (int, float)) and not isinstance(mgl, bool):
             self._mgl_spin.setValue(float(mgl))
         if isinstance(ff_g, bool):
@@ -692,6 +722,7 @@ class PvtTunerWindow(QMainWindow):
         targets: list[tuple[str, object]] = [
             ("Kp", float(self._kp_spin.value())),
             ("Kd", float(self._kd_spin.value())),
+            ("Kd_damp", float(self._kd_damp_spin.value())),
             ("mgl", float(self._mgl_spin.value())),
             ("ff_gravity", bool(self._ff_grav_check.isChecked())),
         ]
@@ -856,6 +887,205 @@ class PvtTunerWindow(QMainWindow):
         color = C_GREEN if absv < 0.05 else C_YELLOW if absv < 0.2 else C_RED
         self._foll_err_label.setText(f"{e:+8.4f} rad")
         self._foll_err_label.setStyleSheet(f"color: {color};")
+
+    # ─── ALL-PARAMETERS TAB ─────────────────────────────────
+
+    # System / read-only params not worth showing in the editor.
+    _PARAMS_HIDDEN = frozenset({
+        "use_sim_time",
+        "qos_overrides",
+        "start_type_description_service",
+    })
+
+    def _build_params_tab(self, root: QWidget):
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        self._params_tab_status = QLabel("(select a controller in the Tuner tab)")
+        self._params_tab_status.setFont(QFont("monospace", 9))
+        self._params_tab_status.setStyleSheet(f"color: {C_SUBTEXT};")
+        header.addWidget(self._params_tab_status)
+        header.addStretch()
+        self._params_refresh_btn = QPushButton("Refresh")
+        self._params_refresh_btn.setFixedWidth(90)
+        self._params_refresh_btn.clicked.connect(self._refresh_all_params_async)
+        header.addWidget(self._params_refresh_btn)
+        layout.addLayout(header)
+
+        # Scrollable grid: name | editor | Set
+        self._params_grid_host = QWidget()
+        self._params_grid = QGridLayout(self._params_grid_host)
+        self._params_grid.setColumnStretch(1, 1)
+        self._params_grid.setHorizontalSpacing(10)
+        self._params_grid.setVerticalSpacing(4)
+
+        scroll = QScrollArea()
+        scroll.setWidget(self._params_grid_host)
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll, 1)
+
+        # name -> (editor, get_value_fn, set_btn, set_btn_label)
+        self._params_editors: dict[str, tuple] = {}
+
+    def _clear_params_grid(self):
+        while self._params_grid.count():
+            item = self._params_grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._params_editors.clear()
+
+    def _refresh_all_params_async(self):
+        ctrl = self._current_ctrl
+        if not ctrl:
+            self._params_tab_status.setText("(select a controller in the Tuner tab)")
+            self._params_tab_status.setStyleSheet(f"color: {C_SUBTEXT};")
+            return
+        self._params_refresh_btn.setEnabled(False)
+        self._params_tab_status.setText(f"loading {ctrl} …")
+        self._params_tab_status.setStyleSheet(f"color: {C_BLUE};")
+        threading.Thread(
+            target=self._all_params_worker, args=(ctrl,), daemon=True
+        ).start()
+
+    def _all_params_worker(self, ctrl: str):
+        names = self._rclpy_list_params(ctrl)
+        names = sorted(
+            n for n in names
+            if n not in self._PARAMS_HIDDEN and not n.startswith("qos_overrides.")
+        )
+        print(f"[pvt_tuner] list_parameters({ctrl}) -> {len(names)} names",
+              file=sys.stderr, flush=True)
+        if not names:
+            self._all_params_sig.emit(ctrl, {})
+            return
+        values = self._rclpy_get_params(ctrl, names, timeout=10.0)
+        self._all_params_sig.emit(ctrl, values)
+
+    def _on_all_params_loaded(self, ctrl: str, values: dict):
+        """GUI-thread handler — rebuild the grid."""
+        self._params_refresh_btn.setEnabled(True)
+        if self._current_ctrl != ctrl:
+            return  # stale response
+        self._clear_params_grid()
+        if not values:
+            self._params_tab_status.setText(
+                f"no parameters returned for {ctrl}"
+            )
+            self._params_tab_status.setStyleSheet(f"color: {C_YELLOW};")
+            return
+
+        self._params_tab_status.setText(
+            f"{ctrl}  ({len(values)} parameters)"
+        )
+        self._params_tab_status.setStyleSheet(f"color: {C_GREEN};")
+
+        for row, (name, value) in enumerate(values.items()):
+            label = QLabel(name)
+            label.setFont(QFont("monospace", 10))
+            self._params_grid.addWidget(label, row, 0)
+
+            editor, get_fn = self._make_param_editor(value)
+            self._params_grid.addWidget(editor, row, 1)
+
+            set_btn = QPushButton("Set")
+            set_btn.setFixedWidth(60)
+            set_btn.setStyleSheet(
+                f"background-color: {C_SURFACE0}; color: {C_GREEN}; "
+                f"border: 1px solid {C_GREEN};"
+            )
+            set_btn.clicked.connect(
+                lambda _checked=False, n=name, g=get_fn: self._set_one_param(n, g())
+            )
+            self._params_grid.addWidget(set_btn, row, 2)
+
+            self._params_editors[name] = (editor, get_fn, set_btn)
+
+    @staticmethod
+    def _make_param_editor(value):
+        """Return (widget, get_value_callable) appropriate for ``value`` type."""
+        if isinstance(value, bool):
+            w = QCheckBox()
+            w.setChecked(value)
+            return w, w.isChecked
+        if isinstance(value, int):
+            w = QSpinBox()
+            w.setRange(-2_147_483_648, 2_147_483_647)
+            w.setValue(value)
+            return w, w.value
+        if isinstance(value, float):
+            w = QDoubleSpinBox()
+            w.setDecimals(6)
+            w.setRange(-1e9, 1e9)
+            w.setSingleStep(0.01)
+            w.setValue(value)
+            return w, w.value
+        if isinstance(value, str):
+            w = QLineEdit(value)
+            return w, w.text
+        # Fallback (arrays etc.): read-only label.
+        w = QLineEdit(repr(value))
+        w.setReadOnly(True)
+        w.setStyleSheet(f"color: {C_SUBTEXT};")
+        return w, lambda: None
+
+    def _set_one_param(self, name: str, value):
+        ctrl = self._current_ctrl
+        if not ctrl or value is None:
+            return
+        editor_tuple = self._params_editors.get(name)
+        if editor_tuple is not None:
+            editor_tuple[2].setEnabled(False)
+        threading.Thread(
+            target=self._set_one_worker, args=(ctrl, name, value), daemon=True
+        ).start()
+
+    def _set_one_worker(self, ctrl, name, value):
+        print(f"[pvt_tuner] set_one {name}={value!r}",
+              file=sys.stderr, flush=True)
+        results = self._rclpy_set_params(ctrl, [(name, value)])
+        if results:
+            n, ok, msg = results[0]
+            self._param_set_sig.emit(n, ok, msg)
+        else:
+            self._param_set_sig.emit(name, False, "no response")
+
+    def _on_param_set(self, name: str, ok: bool, msg: str):
+        editor_tuple = self._params_editors.get(name)
+        if editor_tuple is None:
+            return
+        editor, _, set_btn = editor_tuple
+        set_btn.setEnabled(True)
+        # Flash the Set button colour to give feedback.
+        color = C_GREEN if ok else C_RED
+        set_btn.setStyleSheet(
+            f"background-color: {C_SURFACE0}; color: {color}; "
+            f"border: 1px solid {color};"
+        )
+        self._params_tab_status.setText(
+            f"{name}: {'OK' if ok else 'FAIL'}" + (f" — {msg}" if msg else "")
+        )
+        self._params_tab_status.setStyleSheet(f"color: {color};")
+
+    def _rclpy_list_params(self, ctrl: str, timeout: float = 5.0):
+        client = self._node.create_client(ListParameters, f"{ctrl}/list_parameters")
+        try:
+            if not client.wait_for_service(timeout_sec=timeout):
+                return []
+            req = ListParameters.Request()
+            req.depth = 0  # all
+            future = client.call_async(req)
+            deadline = time.time() + timeout
+            while not future.done() and time.time() < deadline:
+                time.sleep(0.02)
+            if not future.done():
+                return []
+            resp = future.result()
+            return list(resp.result.names)
+        finally:
+            self._node.destroy_client(client)
 
 
 # ───────────────────────────────────────────────────────────

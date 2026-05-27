@@ -1,6 +1,7 @@
 #include "pendulum_pd_control/drive_status_broadcaster.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 
 #include "pluginlib/class_list_macros.hpp"
@@ -74,6 +75,24 @@ controller_interface::CallbackReturn DriveStatusBroadcaster::on_configure(
     "/diagnostics", rclcpp::SystemDefaultsQoS());
   diag_rt_pub_ = std::make_unique<DiagPublisher>(diag_pub_);
 
+  // Pre-allocate the diagnostic payload — status name/hardware_id, the
+  // KeyValue slot per signal with its key already set, and reserve enough
+  // capacity in each .value / status.message so update() can re-stamp them
+  // in place without any heap traffic on the RT path.
+  {
+    auto & m = diag_rt_pub_->msg_;
+    m.status.resize(1);
+    auto & st = m.status[0];
+    st.name = "pendulum_drive: telemetry";
+    st.hardware_id = joint_;
+    st.message.reserve(48);
+    st.values.resize(signals_.size());
+    for (size_t i = 0; i < signals_.size(); ++i) {
+      st.values[i].key = signals_[i];
+      st.values[i].value.reserve(24);
+    }
+  }
+
   return controller_interface::CallbackReturn::SUCCESS;
 }
 
@@ -117,11 +136,15 @@ controller_interface::return_type DriveStatusBroadcaster::update(
   }
   last_publish_time_ = time;
 
-  diagnostic_msgs::msg::DiagnosticStatus status;
-  status.name = "pendulum_drive: telemetry";
-  status.hardware_id = joint_;
-  status.level = diagnostic_msgs::msg::DiagnosticStatus::OK;
-  status.message = "OK";
+  // The diagnostic payload's shape (status[0], status[0].values[i].key) was
+  // pre-allocated in on_configure; here we only re-stamp scalar fields and
+  // the pre-reserved value/message strings — no allocations on the RT path.
+  if (!diag_rt_pub_->trylock()) {
+    return controller_interface::return_type::OK;
+  }
+  auto & st = diag_rt_pub_->msg_.status[0];
+  uint8_t worst_level = diagnostic_msgs::msg::DiagnosticStatus::OK;
+  const char * worst_msg = "OK";
 
   for (size_t i = 0; i < signals_.size(); ++i) {
     const auto value_opt = state_interfaces_[i].get_optional();
@@ -133,16 +156,17 @@ controller_interface::return_type DriveStatusBroadcaster::update(
       signal_rt_pubs_[i]->unlockAndPublish();
     }
 
-    diagnostic_msgs::msg::KeyValue kv;
-    kv.key = name;
-    kv.value = std::to_string(value);
-    status.values.push_back(kv);
+    // snprintf into the pre-reserved string buffer (no allocation while the
+    // formatted output stays within the 24-byte reserve).
+    char buf[32];
+    const int n = std::snprintf(buf, sizeof(buf), "%g", value);
+    st.values[i].value.assign(buf, n > 0 ? static_cast<size_t>(n) : 0);
 
     // Thresholding for the three signals we recognise.
-    auto escalate = [&status](uint8_t level, const std::string & msg) {
-      if (level > status.level) {
-        status.level = level;
-        status.message = msg;
+    auto escalate = [&worst_level, &worst_msg](uint8_t level, const char * msg) {
+      if (level > worst_level) {
+        worst_level = level;
+        worst_msg = msg;
       }
     };
     if (name == "motor_temperature") {
@@ -164,12 +188,10 @@ controller_interface::return_type DriveStatusBroadcaster::update(
     }
   }
 
-  if (diag_rt_pub_->trylock()) {
-    diag_rt_pub_->msg_.header.stamp = time;
-    diag_rt_pub_->msg_.status.clear();
-    diag_rt_pub_->msg_.status.push_back(status);
-    diag_rt_pub_->unlockAndPublish();
-  }
+  st.level = worst_level;
+  st.message.assign(worst_msg);
+  diag_rt_pub_->msg_.header.stamp = time;
+  diag_rt_pub_->unlockAndPublish();
 
   return controller_interface::return_type::OK;
 }

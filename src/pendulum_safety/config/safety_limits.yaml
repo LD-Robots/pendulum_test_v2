@@ -41,7 +41,11 @@
                                         #         (latching e-stop on a dead feed)
 
 # Supervisor-only parameters. Targeted by node name so they do not leak onto
-# the controllers. Each action is "free" (zero torque) or "hold" (lock pos).
+# the controllers. Each action is one of:
+#   "free" — zero all torque, joint coasts
+#   "hold" — actively regulate to the position latched when the e-stop fired
+#   "damp" — viscous brake (tau = -Kd_damp * qd, no position term);
+#            Kd_damp lives on the controller (PVT only)
 pendulum_safety_supervisor:
   ros__parameters:
     joint_name: pendulum_joint
@@ -66,4 +70,4 @@ pendulum_safety_supervisor:
     action.position: hold
     action.manual: free
     action.stale_joint_state: hold
-    action.sustained_effort: free
+    action.sustained_effort: hold

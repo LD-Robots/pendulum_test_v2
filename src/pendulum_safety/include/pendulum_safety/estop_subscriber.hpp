@@ -24,7 +24,8 @@ struct SafetySignal
 /// latched subscriptions the supervisor publishes and stores their values in
 /// lock-free atomics so update() can read the current SafetySignal with no
 /// allocation and no locking. Topics:
-///   /pendulum/safety/estop_state  (std_msgs/Int8:    0 clear, 1 FREE, 2 HOLD)
+///   /pendulum/safety/estop_state  (std_msgs/Int8:    0 clear, 1 FREE, 2 HOLD,
+///                                                    3 DAMPING)
 ///   /pendulum/safety/kp_scale     (std_msgs/Float64: thermal Kp multiplier)
 ///
 /// When no supervisor is running the topics have no publisher; the atomics
@@ -58,7 +59,11 @@ public:
     SafetySignal signal;
     const int8_t state = estop_state_.load();
     signal.estop_active = (state != 0);
-    signal.action = (state == 2) ? EstopAction::HOLD : EstopAction::FREE;
+    switch (state) {
+      case 2:  signal.action = EstopAction::HOLD;    break;
+      case 3:  signal.action = EstopAction::DAMPING; break;
+      default: signal.action = EstopAction::FREE;    break;
+    }
     signal.kp_scale = kp_scale_.load();
     return signal;
   }

@@ -26,8 +26,9 @@ enum class BreachReason : uint8_t
 /// What a control path should do while an e-stop is latched.
 enum class EstopAction : uint8_t
 {
-  FREE = 0,   ///< zero all torque — the joint coasts
-  HOLD = 1,   ///< hold the position latched when the e-stop fired
+  FREE    = 0,   ///< zero all torque — the joint coasts
+  HOLD    = 1,   ///< hold the position latched when the e-stop fired
+  DAMPING = 2,   ///< viscous brake — tau = -Kd_damp * qd (no position term)
 };
 
 /// Plain-data limit set shared by every safety consumer. POD: trivially

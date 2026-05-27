@@ -18,6 +18,10 @@ pendulum_pvt_controller:
 
     Kp:        22.95           # stiffness  (Nm/rad)   — streamed to PVT_KP
     Kd:        2.14            # damping    (Nm·s/rad) — streamed to PVT_KD
+    Kd_damp:   1.0             # DAMPING-mode kd (Nm·s/rad) — applied when ~/damp
+                               # is called or an e-stop fires with action: damp.
+                               # Independent of Kd so the brake can be tuned
+                               # without disturbing tracking gains.
     # effort / position / velocity caps: pendulum_safety/config/safety_limits.yaml
 
     mgl:       4.10            # gravity torque amplitude — placeholder, rig-specific

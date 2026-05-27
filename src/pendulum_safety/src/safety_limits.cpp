@@ -25,8 +25,9 @@ const char * to_string(BreachReason reason)
 const char * to_string(EstopAction action)
 {
   switch (action) {
-    case EstopAction::FREE: return "FREE";
-    case EstopAction::HOLD: return "HOLD";
+    case EstopAction::FREE:    return "FREE";
+    case EstopAction::HOLD:    return "HOLD";
+    case EstopAction::DAMPING: return "DAMPING";
   }
   return "UNKNOWN";
 }
