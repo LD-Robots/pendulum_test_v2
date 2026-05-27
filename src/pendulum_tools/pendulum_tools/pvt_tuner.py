@@ -132,6 +132,10 @@ class PvtTunerWindow(QMainWindow):
     _apply_results_sig = pyqtSignal(object)  # list of (name, ok, msg)
     _all_params_sig = pyqtSignal(str, object)  # ctrl, {name: value}
     _param_set_sig = pyqtSignal(str, bool, str)  # name, ok, message
+    # Safety limits panel. Loaded values are {short_name: (supervisor_val,
+    # controller_val)}; apply results are [(short_name, sup_ok, ctrl_ok, msg)].
+    _safety_loaded_sig = pyqtSignal(object)
+    _safety_applied_sig = pyqtSignal(object)
 
     def __init__(self, node: Node):
         super().__init__()
@@ -160,6 +164,7 @@ class PvtTunerWindow(QMainWindow):
         self._build_gains_box(layout)
         self._build_mode_box(layout)
         self._build_safety_box(layout)
+        self._build_safety_limits_box(layout)
         self._build_telem_box(layout)
         layout.addStretch()
         self._tabs.addTab(tuner_tab, "Tuner")
@@ -181,6 +186,8 @@ class PvtTunerWindow(QMainWindow):
         self._apply_results_sig.connect(self._on_apply_results)
         self._all_params_sig.connect(self._on_all_params_loaded)
         self._param_set_sig.connect(self._on_param_set)
+        self._safety_loaded_sig.connect(self._on_safety_loaded)
+        self._safety_applied_sig.connect(self._on_safety_applied)
 
         # Subscriptions that don't depend on controller discovery
         self._setup_safety_subs()
@@ -337,6 +344,161 @@ class PvtTunerWindow(QMainWindow):
         info.setColumnStretch(1, 1)
         v.addLayout(info)
         parent.addWidget(box)
+
+    # The numeric safety limits exposed in the Safety limits panel. Each lives
+    # as a `safety.<key>` parameter on BOTH the supervisor (used for breach
+    # detection) AND on every controller (used for command clamping). Apply
+    # writes to both so the two stores stay in sync.
+    _SAFETY_LIMIT_FIELDS = (
+        # (key, label, lo, hi, step, decimals)
+        ("position_min",      "pos_min",        -1000.0,  1000.0, 0.01, 4),
+        ("position_max",      "pos_max",        -1000.0,  1000.0, 0.01, 4),
+        ("velocity_limit",    "vel_limit",         0.0,    100.0, 0.1,  3),
+        ("effort_limit",      "effort_limit",      0.0,   1000.0, 0.1,  3),
+        ("slew_rate_limit",   "slew_rate",         0.0,    100.0, 0.1,  3),
+        ("acceleration_limit","accel_limit",       0.0,   1000.0, 1.0,  2),
+    )
+
+    def _build_safety_limits_box(self, parent):
+        box = QGroupBox("Safety limits  (writes to supervisor && active controller)")
+        grid = QGridLayout(box)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+
+        # Two fields per row: (label, spin, label, spin) across 6 columns.
+        self._safety_spins: dict[str, QDoubleSpinBox] = {}
+        for idx, (key, label, lo, hi, step, decimals) in enumerate(
+            self._SAFETY_LIMIT_FIELDS
+        ):
+            row = idx // 2
+            col = (idx % 2) * 3
+            spin = self._make_spin(lo, hi, step, decimals)
+            self._safety_spins[key] = spin
+            grid.addWidget(QLabel(label), row, col)
+            grid.addWidget(spin, row, col + 1)
+
+        btn_row = len(self._SAFETY_LIMIT_FIELDS) // 2 + 1
+        self._safety_read_btn = QPushButton("Read")
+        self._safety_read_btn.setStyleSheet(
+            f"background-color: {C_SURFACE0}; color: {C_BLUE}; "
+            f"border: 1px solid {C_BLUE};"
+        )
+        self._safety_read_btn.clicked.connect(self._on_read_safety_limits)
+        grid.addWidget(self._safety_read_btn, btn_row, 4)
+
+        self._safety_apply_btn = QPushButton("Apply")
+        self._safety_apply_btn.setStyleSheet(
+            f"background-color: {C_SURFACE0}; color: {C_GREEN}; "
+            f"border: 1px solid {C_GREEN};"
+        )
+        self._safety_apply_btn.clicked.connect(self._on_apply_safety_limits)
+        grid.addWidget(self._safety_apply_btn, btn_row, 5)
+
+        self._safety_status = QLabel(" ")
+        self._safety_status.setFont(QFont("monospace", 9))
+        self._safety_status.setStyleSheet(f"color: {C_SUBTEXT};")
+        grid.addWidget(self._safety_status, btn_row + 1, 0, 1, 6)
+
+        parent.addWidget(box)
+
+    def _on_read_safety_limits(self):
+        ctrl = self._current_ctrl
+        if not ctrl:
+            self._safety_status.setText("no controller selected")
+            self._safety_status.setStyleSheet(f"color: {C_YELLOW};")
+            return
+        self._safety_read_btn.setEnabled(False)
+        keys = [k for k, *_ in self._SAFETY_LIMIT_FIELDS]
+        names = [f"safety.{k}" for k in keys]
+
+        def worker():
+            sup_vals = self._rclpy_get_params(SUPERVISOR_NODE, names)
+            ctrl_vals = self._rclpy_get_params(ctrl, names)
+            merged = {
+                k: (sup_vals.get(f"safety.{k}"), ctrl_vals.get(f"safety.{k}"))
+                for k in keys
+            }
+            self._safety_loaded_sig.emit(merged)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_safety_loaded(self, merged: dict):
+        self._safety_read_btn.setEnabled(True)
+        mismatches = []
+        any_value = False
+        for key, (sup_v, ctrl_v) in merged.items():
+            # Prefer supervisor's value (authoritative for breach detection).
+            v = sup_v if isinstance(sup_v, (int, float)) else ctrl_v
+            if isinstance(v, (int, float)):
+                any_value = True
+                self._safety_spins[key].setValue(float(v))
+            if (isinstance(sup_v, (int, float)) and
+                isinstance(ctrl_v, (int, float)) and
+                abs(sup_v - ctrl_v) > 1e-9):
+                mismatches.append(f"{key}: sup={sup_v:.4g} ctrl={ctrl_v:.4g}")
+        if not any_value:
+            self._safety_status.setText("no safety.* params returned")
+            self._safety_status.setStyleSheet(f"color: {C_YELLOW};")
+        elif mismatches:
+            self._safety_status.setText(
+                "mismatch (supervisor shown): " + " | ".join(mismatches)
+            )
+            self._safety_status.setStyleSheet(f"color: {C_YELLOW};")
+        else:
+            self._safety_status.setText("read OK — supervisor and controller agree")
+            self._safety_status.setStyleSheet(f"color: {C_GREEN};")
+
+    def _on_apply_safety_limits(self):
+        ctrl = self._current_ctrl
+        if not ctrl:
+            self._safety_status.setText("no controller selected")
+            self._safety_status.setStyleSheet(f"color: {C_YELLOW};")
+            return
+        self._safety_apply_btn.setEnabled(False)
+        pairs = [
+            (f"safety.{k}", float(self._safety_spins[k].value()))
+            for k, *_ in self._SAFETY_LIMIT_FIELDS
+        ]
+
+        def worker():
+            print(f"[pvt_tuner] safety apply -> supervisor + {ctrl}: {pairs}",
+                  file=sys.stderr, flush=True)
+            sup_res = self._rclpy_set_params(SUPERVISOR_NODE, pairs)
+            ctrl_res = self._rclpy_set_params(ctrl, pairs)
+            # Stitch into [(short_name, sup_ok, ctrl_ok, msg)].
+            sup_by_name = {n: (ok, msg) for (n, ok, msg) in sup_res}
+            ctrl_by_name = {n: (ok, msg) for (n, ok, msg) in ctrl_res}
+            stitched = []
+            for full, _ in pairs:
+                short = full[len("safety."):]
+                sup_ok, sup_msg = sup_by_name.get(full, (False, "no response"))
+                ctrl_ok, ctrl_msg = ctrl_by_name.get(full, (False, "no response"))
+                msg = ""
+                if not sup_ok:
+                    msg = f"sup: {sup_msg}"
+                if not ctrl_ok:
+                    msg = (msg + " | " if msg else "") + f"ctrl: {ctrl_msg}"
+                stitched.append((short, sup_ok, ctrl_ok, msg))
+            self._safety_applied_sig.emit(stitched)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_safety_applied(self, results: list):
+        self._safety_apply_btn.setEnabled(True)
+        all_ok = True
+        fails = []
+        for short, sup_ok, ctrl_ok, msg in results:
+            if not (sup_ok and ctrl_ok):
+                all_ok = False
+                fails.append(f"{short} ({msg})")
+        if all_ok:
+            self._safety_status.setText(
+                f"applied to supervisor + controller ({len(results)} fields)"
+            )
+            self._safety_status.setStyleSheet(f"color: {C_GREEN};")
+        else:
+            self._safety_status.setText("FAIL: " + " | ".join(fails))
+            self._safety_status.setStyleSheet(f"color: {C_RED};")
 
     def _build_telem_box(self, parent):
         box = QGroupBox("Telemetry")
@@ -581,6 +743,9 @@ class PvtTunerWindow(QMainWindow):
         ).start()
         # Auto-load the All Parameters tab too so it's never stale.
         self._refresh_all_params_async()
+        # And the Safety limits panel — it reads from both the supervisor and
+        # this controller, so it depends on which controller is selected.
+        self._on_read_safety_limits()
 
     def _load_controller_params(self, ctrl: str):
         names = ["Kp", "Kd", "Kd_damp", "mgl", "ff_gravity", "joint"]
