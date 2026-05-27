@@ -169,10 +169,16 @@ private:
   // before activation and must agree with the index order used in update().
   bool drive_side_pd_{true};
 
-  // Centralised safety: limits loaded once in on_configure; the supervisor's
-  // e-stop / Kp-derate signal read every update(); the rate limiter bounds the
-  // commanded position slew + acceleration.
+  // Centralised safety: limits loaded in on_configure and refreshed by the
+  // post_set_parameters callback (so `ros2 param set safety.position_min …`
+  // takes effect at the next update() without a restart). The supervisor's
+  // e-stop / Kp-derate signal is read every update(); the rate limiter bounds
+  // the commanded position slew + acceleration.
   pendulum_safety::SafetyLimits limits_;
+  // RT-safe snapshot of limits_. Written by the post_set callback on the
+  // executor thread; read lock-free in update() (try_lock semantics, same
+  // pattern as params_buf_).
+  realtime_tools::RealtimeBuffer<pendulum_safety::SafetyLimits> limits_buf_;
   pendulum_safety::EstopSubscriber safety_;
   pendulum_safety::RateLimiter rate_limiter_;
   double estop_hold_pos_{0.0};   // joint position snapshotted when e-stop fires

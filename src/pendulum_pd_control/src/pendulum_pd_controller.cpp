@@ -129,6 +129,9 @@ controller_interface::return_type PendulumPDController::update(
   // Refresh FF flags & gains live — cheap, lets the user toggle ff_gravity
   // or sweep Kp via `ros2 param set` without re-spawning the controller.
   load_params();
+  // Same treatment for safety.* limits — `ros2 param set safety.position_min …`
+  // and friends take effect on the next cycle instead of needing a restart.
+  limits_ = pendulum_safety::loadSafetyLimits(*get_node(), "safety.");
 
   const pendulum_safety::SafetySignal safety = safety_.get();
   const auto mode = mode_.load();

@@ -101,9 +101,11 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
 
   setpoint_buf_.writeFromNonRT(Setpoint{params_.hold_position, 0.0, 0.0});
 
-  // Centralised safety: load the shared limits and subscribe to the
-  // supervisor's e-stop / Kp-derate signal.
+  // Centralised safety: load the shared limits, seed the RT snapshot, and
+  // subscribe to the supervisor's e-stop / Kp-derate signal. The post_set
+  // callback below keeps limits_buf_ in sync as safety.* params change.
   limits_ = pendulum_safety::loadSafetyLimits(*get_node(), "safety.");
+  limits_buf_.writeFromNonRT(limits_);
   safety_.subscribe(get_node());
 
   auto node = get_node();
@@ -184,13 +186,19 @@ controller_interface::CallbackReturn PendulumPVTController::on_configure(
     [this, node](const std::vector<rclcpp::Parameter> & /*params*/) {
       load_params();
       params_buf_.writeFromNonRT(params_);
+      // Also pick up live edits to safety.* — `ros2 param set
+      // safety.position_min -1.0` takes effect at the next update().
+      limits_ = pendulum_safety::loadSafetyLimits(*node, "safety.");
+      limits_buf_.writeFromNonRT(limits_);
       // Diagnostic: confirms `ros2 param set` (or the tuner Apply) actually
       // landed and that the new values are now in the RT snapshot. Remove or
       // downgrade to DEBUG once param-set behaviour is verified.
       RCLCPP_INFO(node->get_logger(),
-        "post_set fired: Kp=%.3f Kd=%.3f Kd_damp=%.3f ff_gravity=%d",
+        "post_set fired: Kp=%.3f Kd=%.3f Kd_damp=%.3f ff_gravity=%d "
+        "position_min=%.3f position_max=%.3f velocity_limit=%.3f",
         params_.Kp, params_.Kd, params_.Kd_damp,
-        static_cast<int>(params_.ff_gravity));
+        static_cast<int>(params_.ff_gravity),
+        limits_.position_min, limits_.position_max, limits_.velocity_limit);
     });
 
   return controller_interface::CallbackReturn::SUCCESS;
@@ -231,6 +239,8 @@ controller_interface::CallbackReturn PendulumPVTController::on_activate(
   // Refresh in case the user changed params between configure and activate.
   load_params();
   params_buf_.writeFromNonRT(params_);
+  limits_ = pendulum_safety::loadSafetyLimits(*get_node(), "safety.");
+  limits_buf_.writeFromNonRT(limits_);
 
   // Default to FREE on activation so a stale setpoint can't kick the joint.
   mode_.store(Mode::FREE);
@@ -311,6 +321,8 @@ controller_interface::return_type PendulumPVTController::update(
   // readFromRT uses try_to_lock; if the post-set callback is mid-write we
   // simply see the previous snapshot, one cycle stale — never a stall.
   params_ = *params_buf_.readFromRT();
+  // Same treatment for safety.* limits — live-editable from the param API.
+  limits_ = *limits_buf_.readFromRT();
 
   // Diagnostic: confirms update() reads the freshly-set values. Throttled to
   // ~1 Hz so the RT log volume stays sane. Remove once param-set behaviour

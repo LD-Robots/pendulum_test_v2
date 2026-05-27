@@ -300,6 +300,12 @@ void SafetySupervisor::publishEstopState()
 
 void SafetySupervisor::onWatchdog()
 {
+  // Re-read safety limits so `ros2 param set safety.position_min …` (and the
+  // other limits) take effect at the next watchdog tick instead of needing a
+  // restart. After the first call every key is already declared, so this is
+  // just a handful of get_parameter() lookups per cycle.
+  limits_ = loadSafetyLimits(*this, "safety.");
+
   const double dt = 1.0 / watchdog_rate_hz_;
 
   // Arm breach detection only after the joint-state feed has been continuously
